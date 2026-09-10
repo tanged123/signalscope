@@ -260,6 +260,10 @@ pub struct PanelState {
     pub x_scale: Option<AxisScale>,
     #[serde(default)]
     pub y_scale: Option<AxisScale>,
+    #[serde(default)]
+    pub x_reversed: Option<bool>,
+    #[serde(default)]
+    pub y_reversed: Option<bool>,
     pub bindings: Vec<Binding>,
     #[serde(default)]
     pub color_by: Option<StyleDimension>,

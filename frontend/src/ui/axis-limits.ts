@@ -7,6 +7,8 @@ export interface AxisLimits {
   xScale?: AxisScale;
   yScale?: AxisScale;
   cScale?: AxisScale;
+  xReversed?: boolean;
+  yReversed?: boolean;
   x: Limits;
   y: Limits;
   c: Limits;
@@ -44,6 +46,7 @@ export function showAxisLimits(
       min: HTMLInputElement;
       max: HTMLInputElement;
       label: HTMLInputElement;
+      reversed: HTMLInputElement | null;
     }
   >();
   for (const dimension of ["x", "y", "c"] as const) {
@@ -132,8 +135,21 @@ export function showAxisLimits(
       update();
     });
     update();
-    controls.set(dimension, { mode, scale, min, max, label });
     fieldset.append(fields);
+    let reversed: HTMLInputElement | null = null;
+    if (dimension !== "c") {
+      const toggle = document.createElement("label");
+      toggle.className = "axis-limits-reverse";
+      reversed = document.createElement("input");
+      reversed.type = "checkbox";
+      reversed.checked = state[`${dimension}_reversed`] === true;
+      toggle.append(
+        reversed,
+        dimension === "x" ? "Flip horizontal (X)" : "Flip vertical (Y)",
+      );
+      fieldset.append(toggle);
+    }
+    controls.set(dimension, { mode, scale, min, max, label, reversed });
     form.append(fieldset);
   }
   const equalLabel = document.createElement("label");
@@ -202,6 +218,8 @@ export function showAxisLimits(
     for (const dimension of ["x", "y", "c"] as const) {
       const fields = controls.get(dimension);
       if (fields === undefined) continue;
+      if (dimension !== "c")
+        draft[`${dimension}Reversed`] = fields.reversed?.checked === true;
       draft[`${dimension}Scale`] =
         fields.scale.value === "log" ? "log" : "linear";
       if (fields.mode.value === "fixed") {

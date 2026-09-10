@@ -11,6 +11,8 @@ function panel(id: string, title: string): PanelState {
     axis_equal: false,
     x_scale: null,
     y_scale: null,
+    x_reversed: null,
+    y_reversed: null,
     bindings: [],
     color_by: "source",
     dash_by: null,

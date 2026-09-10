@@ -23,6 +23,8 @@ interface Line2DAxisInput {
 
 export interface Line2DRenderInput {
   axisEqual?: boolean;
+  xReversed?: boolean;
+  yReversed?: boolean;
   colorScale?: ColorScale | undefined;
   xOrigin: number;
   series: readonly Line2DSeriesInput[];

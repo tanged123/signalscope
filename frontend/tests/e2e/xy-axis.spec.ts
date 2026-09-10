@@ -229,6 +229,12 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await editor.getByLabel("X limits mode").selectOption("fixed");
     await editor.getByLabel("X minimum", { exact: true }).fill("0");
     await editor.getByLabel("X maximum", { exact: true }).fill("10");
+    await editor
+      .getByRole("checkbox", { name: "Flip horizontal (X)", exact: true })
+      .check();
+    await editor
+      .getByRole("checkbox", { name: "Flip vertical (Y)", exact: true })
+      .check();
     await editor.getByLabel("Y limits mode").selectOption("fixed");
     await editor.getByLabel("Y minimum", { exact: true }).fill("1");
     await editor.getByLabel("Y maximum", { exact: true }).fill("8");
@@ -429,9 +435,15 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
           readFileSync(pathToFileURL(workspacePath), "utf8"),
         ) as Session;
         const current = state.tabs[0]?.panels[0];
-        return [current?.x_scale, current?.y_scale, current?.color_axis?.scale];
+        return [
+          current?.x_scale,
+          current?.y_scale,
+          current?.color_axis?.scale,
+          current?.x_reversed,
+          current?.y_reversed,
+        ];
       })
-      .toEqual(["log", "log", "log"]);
+      .toEqual(["log", "log", "log", true, true]);
     await page.screenshot({ path: testInfo.outputPath("xy-log-scales.png") });
     const snapshotPath = testInfo.outputPath("xy-color.html");
     await promisify(execFile)(
@@ -473,6 +485,12 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     );
     expect(offlineRequests).toEqual([]);
     await page.locator(".panel-axis-limits").click();
+    await expect(
+      page.getByRole("checkbox", { name: "Flip horizontal (X)", exact: true }),
+    ).toBeChecked();
+    await expect(
+      page.getByRole("checkbox", { name: "Flip vertical (Y)", exact: true }),
+    ).toBeChecked();
     for (const axis of ["X", "Y", "C"]) {
       await expect(
         page.getByLabel(`${axis} scale`, { exact: true }),

@@ -62,6 +62,8 @@ export function axisActions(host: AxisActionHost) {
       host.workspace.setAxisLabel(id, "y", limits.yLabel);
       panel.x_scale = limits.xScale ?? "linear";
       panel.y_scale = limits.yScale ?? "linear";
+      panel.x_reversed = limits.xReversed === true;
+      panel.y_reversed = limits.yReversed === true;
       panel.axis_equal =
         limits.axisEqual && panel.x_scale !== "log" && panel.y_scale !== "log";
       if (panel.color_axis != null)

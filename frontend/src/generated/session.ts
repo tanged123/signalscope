@@ -117,6 +117,8 @@ export interface PanelState {
   axis_equal: boolean | null;
   x_scale: AxisScale | null;
   y_scale: AxisScale | null;
+  x_reversed: boolean | null;
+  y_reversed: boolean | null;
   bindings: Binding[];
   color_by: StyleDimension | null;
   dash_by: StyleDimension | null;

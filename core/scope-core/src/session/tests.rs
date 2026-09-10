@@ -181,6 +181,8 @@ fn current_session_round_trips() {
                 axis_equal: None,
                 x_scale: None,
                 y_scale: None,
+                x_reversed: None,
+                y_reversed: None,
                 bindings: vec![Binding {
                     kind: BindingKind::Pick,
                     selector: None,

@@ -29,6 +29,8 @@ export function parseBakedSession(sessionJson: string): Session {
       panel.axis_equal ??= false;
       panel.x_scale ??= null;
       panel.y_scale ??= null;
+      panel.x_reversed ??= null;
+      panel.y_reversed ??= null;
     }
   }
   return parsed;
@@ -281,6 +283,8 @@ function isPanel(value: unknown): boolean {
     typeof value.title === "string" &&
     (value.axis_style === "gutter" || value.axis_style === "inline") &&
     (value.axis_equal == null || typeof value.axis_equal === "boolean") &&
+    (value.x_reversed == null || typeof value.x_reversed === "boolean") &&
+    (value.y_reversed == null || typeof value.y_reversed === "boolean") &&
     isAxisScale(value.x_scale) &&
     isAxisScale(value.y_scale) &&
     isLogRange(value.x_scale, value.x_range) &&

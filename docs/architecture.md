@@ -264,6 +264,11 @@ the line adapters pack transformed feeds, and `ui/panel-ranges.ts` resolves
 saved limits against linked time and sticky autoscale. Data queries remain in
 source coordinates for live and baked data alike.
 
+Axis direction is separate presentation state, per
+[ADR 0064](adr/0064-axis-direction.md). `render/axis-direction.ts` reflects packed
+coordinates and display ranges for ChartHost; `plot-math.ts` projects and inverts
+the same direction for interactions. Saved and queried ranges stay ascending.
+
 Before adding a helper, inspect these owners and their tests.
 
 | Need                                        | Existing implementation                                                          |

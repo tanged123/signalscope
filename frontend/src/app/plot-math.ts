@@ -23,6 +23,8 @@ export interface PlotLayout {
   /** Absent means linear; non-positive log coordinates are not drawable. */
   xScale?: AxisScale;
   yScale?: AxisScale;
+  xReversed?: boolean;
+  yReversed?: boolean;
 }
 
 function logSpace(value: number): number {
@@ -74,13 +76,11 @@ export function paddedExtent(
 
 export function projectX(layout: PlotLayout, value: number): number {
   const { plot, xRange } = layout;
-  if (layout.xScale === "log") {
-    const min = logSpace(xRange.min);
-    const max = logSpace(xRange.max);
-    return plot.x + ((logSpace(value) - min) / (max - min)) * plot.width;
-  }
+  const min = axisCoordinate(xRange.min, layout.xScale);
+  const max = axisCoordinate(xRange.max, layout.xScale);
+  const fraction = (axisCoordinate(value, layout.xScale) - min) / (max - min);
   return (
-    plot.x + ((value - xRange.min) / (xRange.max - xRange.min)) * plot.width
+    plot.x + (layout.xReversed === true ? 1 - fraction : fraction) * plot.width
   );
 }
 
@@ -88,21 +88,21 @@ export function projectY(layout: PlotLayout, value: number): number {
   const { plot, yRange } = layout;
   const min = axisCoordinate(yRange.min, layout.yScale);
   const max = axisCoordinate(yRange.max, layout.yScale);
+  const fraction = (axisCoordinate(value, layout.yScale) - min) / (max - min);
   return (
-    plot.y +
-    plot.height -
-    ((axisCoordinate(value, layout.yScale) - min) / (max - min)) * plot.height
+    plot.y + (layout.yReversed === true ? fraction : 1 - fraction) * plot.height
   );
 }
 
 export function invertX(layout: PlotLayout, px: number): number {
   const { plot, xRange } = layout;
-  if (layout.xScale === "log") {
-    const min = logSpace(xRange.min);
-    const max = logSpace(xRange.max);
-    return 10 ** (min + ((px - plot.x) / plot.width) * (max - min));
-  }
-  return xRange.min + ((px - plot.x) / plot.width) * (xRange.max - xRange.min);
+  const min = axisCoordinate(xRange.min, layout.xScale);
+  const max = axisCoordinate(xRange.max, layout.xScale);
+  const fraction = (px - plot.x) / plot.width;
+  return axisValue(
+    min + (layout.xReversed === true ? 1 - fraction : fraction) * (max - min),
+    layout.xScale,
+  );
 }
 
 /** Decade ticks covering `[min, max]`, empty when the range is unusable. */
@@ -122,8 +122,9 @@ export function invertY(layout: PlotLayout, py: number): number {
   const { plot, yRange } = layout;
   const min = axisCoordinate(yRange.min, layout.yScale);
   const max = axisCoordinate(yRange.max, layout.yScale);
+  const fraction = (plot.y + plot.height - py) / plot.height;
   return axisValue(
-    min + ((plot.y + plot.height - py) / plot.height) * (max - min),
+    min + (layout.yReversed === true ? 1 - fraction : fraction) * (max - min),
     layout.yScale,
   );
 }

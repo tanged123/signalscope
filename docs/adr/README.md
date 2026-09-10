@@ -72,6 +72,7 @@ progress; amend earlier records with explicit links when their guidance changes.
 53. [Configurable scientific palettes](0061-configurable-scientific-palettes.md)
 54. [Named workbench themes](0062-named-workbench-themes.md)
 55. [Logarithmic axis scales](0063-logarithmic-axis-scales.md)
+56. [Axis direction](0064-axis-direction.md)
 
 ## Superseded decisions
 

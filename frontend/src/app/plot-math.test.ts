@@ -25,6 +25,34 @@ const layout: PlotLayout = {
   yRange: { min: -100, max: 100 },
 };
 
+test.each(["linear", "log"] as const)(
+  "reversed %s axes mirror projections and preserve original values",
+  (scale) => {
+    for (const xReversed of [false, true])
+      for (const yReversed of [false, true]) {
+        const view: PlotLayout = {
+          ...layout,
+          xScale: scale,
+          yScale: scale,
+          xRange: { min: 1, max: 100 },
+          yRange: { min: 1, max: 100 },
+          xReversed,
+          yReversed,
+        };
+        expect(projectX(view, 1)).toBe(
+          layout.plot.x + (xReversed ? layout.plot.width : 0),
+        );
+        expect(projectY(view, 1)).toBe(
+          layout.plot.y + (yReversed ? 0 : layout.plot.height),
+        );
+        for (const value of [1, 3, 10, 100]) {
+          expect(invertX(view, projectX(view, value))).toBeCloseTo(value, 9);
+          expect(invertY(view, projectY(view, value))).toBeCloseTo(value, 9);
+        }
+      }
+  },
+);
+
 function bin(
   t0: number,
   t1: number,

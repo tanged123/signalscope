@@ -19,10 +19,11 @@ function pointer(
   type: "pointerdown" | "pointermove" | "pointerup",
   x: number,
   y: number,
+  button = 0,
 ): void {
   const event = new MouseEvent(type, {
     bubbles: true,
-    button: 0,
+    button,
     clientX: x,
     clientY: y,
   });
@@ -89,6 +90,51 @@ function fixture(view: PlotLayout = layout): {
 }
 
 describe("PlotInteractionController", () => {
+  it("box zoom keeps reversed limits ascending", () => {
+    const { overlay, calls } = fixture({
+      ...layout,
+      xReversed: true,
+      yReversed: true,
+    });
+    pointer(overlay, "pointerdown", 10, 20);
+    pointer(overlay, "pointermove", 60, 70);
+    pointer(overlay, "pointerup", 60, 70);
+    expect(calls.applyXRange).toHaveBeenCalledWith(4, 9);
+    expect(calls.applyYRange).toHaveBeenCalledWith(expect.closeTo(-3, 9), 2);
+  });
+
+  it("reversed pan follows the pointer on both axes", () => {
+    const { overlay, calls } = fixture({
+      ...layout,
+      xReversed: true,
+      yReversed: true,
+    });
+    pointer(overlay, "pointerdown", 50, 50, 2);
+    pointer(overlay, "pointermove", 60, 60, 2);
+    pointer(overlay, "pointerup", 60, 60, 2);
+    expect(calls.applyXRange).toHaveBeenCalledWith(1, 11);
+    expect(calls.applyYRange).toHaveBeenCalledWith(-6, 4);
+  });
+
+  it("reversed wheel zoom keeps the original value under the pointer", () => {
+    vi.useFakeTimers();
+    const { overlay, calls } = fixture({
+      ...layout,
+      xReversed: true,
+      yReversed: true,
+    });
+    const event = new WheelEvent("wheel", { deltaY: Math.log(0.5) / 0.0016 });
+    Object.defineProperties(event, {
+      offsetX: { value: 25 },
+      offsetY: { value: 25 },
+    });
+    overlay.dispatchEvent(event);
+    expect(calls.applyXRange).toHaveBeenCalledWith(3.75, 8.75);
+    expect(calls.applyYRange).toHaveBeenCalledWith(-3.75, 1.25);
+    vi.runAllTimers();
+    vi.useRealTimers();
+  });
+
   it("wheel zooms log Y around its geometric midpoint", () => {
     vi.useFakeTimers();
     const { overlay, calls } = fixture({

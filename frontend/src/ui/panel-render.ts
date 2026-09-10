@@ -17,6 +17,8 @@ export function preparePanelRender(
     | "axis_equal"
     | "x_scale"
     | "y_scale"
+    | "x_reversed"
+    | "y_reversed"
   >,
   data: PanelLineResponse,
   window: { t0: number; t1: number },
@@ -59,6 +61,8 @@ export function preparePanelRender(
     makeRequest: (ranges: { x: Range; y: Range }): ChartRenderRequest => ({
       ...family.makeInput(ranges, styles),
       axisEqual: state.axis_equal === true,
+      xReversed: state.x_reversed === true,
+      yReversed: state.y_reversed === true,
       emphasisIndices,
       palette,
     }),

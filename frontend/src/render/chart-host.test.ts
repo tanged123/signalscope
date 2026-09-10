@@ -163,50 +163,109 @@ async function hostFixture(reportFailure = vi.fn()): Promise<ChartHost> {
 }
 
 describe("ChartHost", () => {
-  it("uses log display coordinates while exposing original ranges and avoiding data republication on zoom", async () => {
+  it.each([false, true])(
+    "uses log coordinates with reversal=%s while retaining raw ranges and range-only zoom",
+    async (reversed) => {
+      const host = await hostFixture();
+      const base = request();
+      const log = {
+        ...base,
+        xOrigin: 0,
+        xRange: { min: 1, max: 100 },
+        yRange: [1, 1000] as const,
+        axisEqual: true,
+        xReversed: reversed,
+        yReversed: reversed,
+        axes: {
+          ...base.axes,
+          x: { label: "X", scale: "log" as const },
+          y: { label: "Y", scale: "log" as const },
+        },
+      };
+      host.render(log);
+      const chart = state.charts.at(-1);
+      if (chart === undefined) throw new Error("missing chart");
+      const options = chart.options as {
+        xAxis: {
+          min: number;
+          max: number;
+          tickFormatter(value: number): string;
+        };
+        yAxis: {
+          min: number;
+          max: number;
+          tickFormatter(value: number): string;
+        };
+      };
+      expect(options.xAxis.min).toBe(reversed ? -2 : 0);
+      expect(options.xAxis.max).toBe(reversed ? -0 : 2);
+      expect(options.yAxis.max).toBe(reversed ? -0 : 3);
+      expect(Number(options.yAxis.tickFormatter(reversed ? -2 : 2))).toBe(100);
+      expect(Number(options.yAxis.tickFormatter(reversed ? 1 : -1))).toBe(0.1);
+      expect(host.layout()).toMatchObject({
+        axisEqual: false,
+        xScale: "log",
+        yScale: "log",
+        xRange: { min: 1, max: 100 },
+        yRange: { min: 1, max: 1000 },
+      });
+      chart.setOption.mockClear();
+      host.render({ ...log, xRange: { min: 10, max: 100 }, yRange: [10, 100] });
+      expect(chart.setOption).not.toHaveBeenCalled();
+      expect(chart.setViewRange).toHaveBeenLastCalledWith({
+        x: reversed ? { min: -2, max: -1 } : { min: 1, max: 2 },
+        y: reversed ? { min: -2, max: -1 } : { min: 1, max: 2 },
+      });
+      host.render(base);
+      expect(chart.setOption).toHaveBeenCalledOnce();
+      expect(host.layout()?.xScale).toBeUndefined();
+      host.dispose();
+    },
+  );
+  it("reflects origin-relative X and Y feeds with original-unit ticks and independent toggles", async () => {
     const host = await hostFixture();
     const base = request();
-    const log = {
+    const data = Float32Array.from([0.25, 1, 1.75, 3]);
+    const input = {
       ...base,
-      xOrigin: 0,
-      xRange: { min: 1, max: 100 },
-      yRange: [1, 1000] as const,
-      axisEqual: true,
-      axes: {
-        ...base.axes,
-        x: { label: "X", scale: "log" as const },
-        y: { label: "Y", scale: "log" as const },
-      },
+      series: base.series.map((line) => ({ ...line, data })),
     };
-    host.render(log);
-    const chart = state.charts.at(-1);
-    if (chart === undefined) throw new Error("missing chart");
-    const options = chart.options as {
-      xAxis: { min: number; max: number; tickFormatter(value: number): string };
-      yAxis: { min: number; max: number; tickFormatter(value: number): string };
-    };
-    expect(options.xAxis.min).toBe(0);
-    expect(options.xAxis.max).toBe(2);
-    expect(options.yAxis.max).toBe(3);
-    expect(Number(options.yAxis.tickFormatter(2))).toBe(100);
-    expect(Number(options.yAxis.tickFormatter(-1))).toBe(0.1);
-    expect(host.layout()).toMatchObject({
-      axisEqual: false,
-      xScale: "log",
-      yScale: "log",
-      xRange: { min: 1, max: 100 },
-      yRange: { min: 1, max: 1000 },
-    });
-    chart.setOption.mockClear();
-    host.render({ ...log, xRange: { min: 10, max: 100 }, yRange: [10, 100] });
-    expect(chart.setOption).not.toHaveBeenCalled();
-    expect(chart.setViewRange).toHaveBeenLastCalledWith({
-      x: { min: 1, max: 2 },
-      y: { min: 1, max: 2 },
-    });
-    host.render(base);
-    expect(chart.setOption).toHaveBeenCalledOnce();
-    expect(host.layout()?.xScale).toBeUndefined();
+    for (const [xReversed, yReversed] of [
+      [true, false],
+      [false, true],
+      [true, true],
+      [false, false],
+    ] as const) {
+      host.render({ ...input, xReversed, yReversed });
+      const chart = state.charts.at(-1);
+      if (chart === undefined) throw new Error("missing chart");
+      const options = chart.options as {
+        series: Array<{ data: Float32Array }>;
+        xAxis: {
+          min: number;
+          max: number;
+          tickFormatter(value: number): string;
+        };
+        yAxis: {
+          min: number;
+          max: number;
+          tickFormatter(value: number): string;
+        };
+      };
+      expect(options.series[0]?.data).toEqual(
+        Float32Array.from([
+          xReversed ? -0.25 : 0.25,
+          yReversed ? -1 : 1,
+          xReversed ? -1.75 : 1.75,
+          yReversed ? -3 : 3,
+        ]),
+      );
+      expect(Number(options.xAxis.tickFormatter(xReversed ? -1 : 1))).toBe(11);
+      expect(Number(options.yAxis.tickFormatter(yReversed ? -2 : 2))).toBe(2);
+      expect(host.layout()?.xRange).toEqual({ min: 10, max: 12 });
+      expect(host.layout()?.xReversed === true).toBe(xReversed);
+      expect(host.layout()?.yReversed === true).toBe(yReversed);
+    }
     host.dispose();
   });
   it.each(["gutter", "inline"] as const)(

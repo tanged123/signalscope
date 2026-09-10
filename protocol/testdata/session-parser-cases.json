@@ -36,6 +36,30 @@
   },
   "cases": [
     {
+      "name": "independent axis reversal",
+      "session": {},
+      "panel": { "x_reversed": true, "y_reversed": false },
+      "valid": true
+    },
+    {
+      "name": "null axis reversal defaults",
+      "session": {},
+      "panel": { "x_reversed": null, "y_reversed": null },
+      "valid": true
+    },
+    {
+      "name": "X reversal must be a boolean",
+      "session": {},
+      "panel": { "x_reversed": "true" },
+      "valid": false
+    },
+    {
+      "name": "Y reversal must be a boolean",
+      "session": {},
+      "panel": { "y_reversed": 1 },
+      "valid": false
+    },
+    {
       "name": "log X Y and C restore positive limits",
       "session": {},
       "panel": {

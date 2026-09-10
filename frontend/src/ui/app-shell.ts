@@ -782,7 +782,7 @@ export class AppShell {
       if (range === null) return;
       const next = panScaledRange(
         range,
-        0.1 * direction,
+        0.1 * direction * (panel.x_reversed === true ? -1 : 1),
         panel.x_scale ?? "linear",
       );
       if (panel.x_axis.kind !== "time") {

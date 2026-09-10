@@ -52,9 +52,13 @@ test("X/Y/C log scales validate as one draft and survive session restore", () =>
   };
   for (const axis of ["X", "Y", "C"]) select(`${axis} scale`, "log");
   expect(
-    required<HTMLInputElement>(document.body, 'input[type="checkbox"]')
+    required<HTMLInputElement>(document.body, ".axis-limits-equal input")
       .disabled,
   ).toBe(true);
+  for (const checkbox of document.querySelectorAll<HTMLInputElement>(
+    ".axis-limits-reverse input",
+  ))
+    checkbox.click();
   select("C limits mode", "fixed");
   required<HTMLInputElement>(document.body, '[aria-label="C minimum"]').value =
     "0";
@@ -80,6 +84,8 @@ test("X/Y/C log scales validate as one draft and survive session restore", () =>
   ).toMatchObject({
     x_scale: "log",
     y_scale: "log",
+    x_reversed: true,
+    y_reversed: true,
     axis_equal: false,
     color_axis: { scale: "log", range: [1, 100] },
   });
@@ -112,9 +118,19 @@ test("axis equal applies with limits, survives restore, and cancels without muta
       { x: [0, 10], y: [0, 5] },
       apply,
     );
-    return required<HTMLInputElement>(document.body, 'input[type="checkbox"]');
+    return required<HTMLInputElement>(
+      document.body,
+      ".axis-limits-equal input",
+    );
   };
   let equal = open();
+  const flips = () => [
+    ...document.querySelectorAll<HTMLInputElement>(
+      ".axis-limits-reverse input",
+    ),
+  ];
+  expect(flips().map((input) => input.checked)).toEqual([false, false]);
+  for (const input of flips()) input.click();
   expect(equal.checked).toBe(false);
   equal.click();
   required(document.body, "form").dispatchEvent(
@@ -122,18 +138,22 @@ test("axis equal applies with limits, survives restore, and cancels without muta
   );
   expect(apply).toHaveBeenCalledOnce();
   expect(panel.axis_equal).toBe(true);
+  expect([panel.x_reversed, panel.y_reversed]).toEqual([true, true]);
   expect(
     parseBakedSession(JSON.stringify(workspace.snapshot())).tabs[0]?.panels[0]
       ?.axis_equal,
   ).toBe(true);
   expect(document.activeElement).toBe(anchor);
   equal = open();
+  expect(flips().map((input) => input.checked)).toEqual([true, true]);
+  for (const input of flips()) input.click();
   expect(equal.checked).toBe(true);
   equal.click();
   equal.dispatchEvent(
     new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
   );
   expect(panel.axis_equal).toBe(true);
+  expect([panel.x_reversed, panel.y_reversed]).toEqual([true, true]);
   expect(apply).toHaveBeenCalledOnce();
 });
 
@@ -146,5 +166,20 @@ test.each([null, undefined, false])(
       parseBakedSession(JSON.stringify(workspace.snapshot())).tabs[0]?.panels[0]
         ?.axis_equal,
     ).toBe(false);
+  },
+);
+
+test.each([null, undefined, false])(
+  "older sessions default both axis directions to normal (%s)",
+  (reversed) => {
+    const workspace = new WorkspaceModel();
+    Object.assign(workspace.addPanelRow(), {
+      x_reversed: reversed,
+      y_reversed: reversed,
+    });
+    const restored = parseBakedSession(JSON.stringify(workspace.snapshot()))
+      .tabs[0]?.panels[0];
+    expect(restored?.x_reversed === true).toBe(false);
+    expect(restored?.y_reversed === true).toBe(false);
   },
 );

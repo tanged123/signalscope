@@ -122,7 +122,8 @@
   border-top: 1px solid var(--border-faint);
 }
 
-.axis-limits-editor .axis-limits-equal {
+.axis-limits-editor .axis-limits-equal,
+.axis-limits-editor .axis-limits-reverse {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -130,7 +131,8 @@
   color: var(--fg-2);
 }
 
-.axis-limits-equal input {
+.axis-limits-equal input,
+.axis-limits-reverse input {
   width: auto;
   accent-color: var(--fg-2);
 }

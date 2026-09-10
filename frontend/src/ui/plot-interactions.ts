@@ -166,7 +166,8 @@ export class PlotInteractionController {
     if (axes.x) {
       const nextX = panScaledRange(
         ranges.x,
-        (from.x - to.x) / layout.plot.width,
+        ((from.x - to.x) / layout.plot.width) *
+          (layout.xReversed === true ? -1 : 1),
         layout.xScale,
       );
       this.host.applyXRange(nextX.min, nextX.max);
@@ -174,7 +175,8 @@ export class PlotInteractionController {
     if (axes.y) {
       const nextY = panScaledRange(
         ranges.y,
-        (to.y - from.y) / layout.plot.height,
+        ((to.y - from.y) / layout.plot.height) *
+          (layout.yReversed === true ? -1 : 1),
         layout.yScale,
       );
       this.host.applyYRange(nextY.min, nextY.max);
@@ -266,14 +268,12 @@ export class PlotInteractionController {
       if (box === null) return;
       if (axes.x && Math.abs(box.x1 - box.x0) <= 6) return;
       if (axes.y && Math.abs(box.y1 - box.y0) <= 6) return;
-      let x = {
-        min: invertX(layout, Math.min(box.x0, box.x1)),
-        max: invertX(layout, Math.max(box.x0, box.x1)),
-      };
-      let y = {
-        min: invertY(layout, Math.max(box.y0, box.y1)),
-        max: invertY(layout, Math.min(box.y0, box.y1)),
-      };
+      const x0 = invertX(layout, box.x0);
+      const x1 = invertX(layout, box.x1);
+      const y0 = invertY(layout, box.y0);
+      const y1 = invertY(layout, box.y1);
+      let x = { min: Math.min(x0, x1), max: Math.max(x0, x1) };
+      let y = { min: Math.min(y0, y1), max: Math.max(y0, y1) };
       if (layout.axisEqual === true && axes.x !== axes.y) {
         if (axes.x)
           y = zoomRange(

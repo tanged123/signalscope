@@ -158,6 +158,8 @@
         "axis_equal": "bool?",
         "x_scale": "AxisScale?",
         "y_scale": "AxisScale?",
+        "x_reversed": "bool?",
+        "y_reversed": "bool?",
         "bindings": "Binding[]",
         "color_by": "StyleDimension?",
         "dash_by": "StyleDimension?",

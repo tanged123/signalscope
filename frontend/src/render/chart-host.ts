@@ -1,4 +1,5 @@
 import { Colorbar } from "./colorbar";
+import { createDirectedFeed, directedRange } from "./axis-direction";
 import {
   ChartGPU,
   type ChartGPUInstance,
@@ -44,6 +45,7 @@ interface SeriesElement {
 }
 
 export class ChartHost {
+  private readonly directedFeed = createDirectedFeed();
   private readonly chart: ChartGPUInstance;
   private readonly colorbar: Colorbar;
   private lastRequest: ChartRenderRequest | null = null;
@@ -128,6 +130,11 @@ export class ChartHost {
       Math.sqrt(FULL_OPACITY_GHOST_COUNT / Math.max(1, ghostCount)),
     );
     const series = request.series.map((line, index) => {
+      const data = this.directedFeed(
+        line.data,
+        request.xReversed,
+        request.yReversed,
+      );
       const style = line.style;
       const isEmphasized = emphasis.has(index);
       const previous = this.elements[index];
@@ -135,7 +142,7 @@ export class ChartHost {
         previous !== undefined &&
         previous.id === line.id &&
         previous.name === line.name &&
-        previous.data === line.data &&
+        previous.data === data &&
         previous.pointColors === line.pointColors &&
         sameStyle(previous.style, style) &&
         previous.emphasis === isEmphasized &&
@@ -169,7 +176,7 @@ export class ChartHost {
       const element: LineSeriesConfig = {
         type: "line",
         name: line.name,
-        data: line.data,
+        data,
         pointColors: line.pointColors,
         sampling: "none",
         color,
@@ -183,7 +190,7 @@ export class ChartHost {
       this.elements[index] = {
         id: line.id,
         name: line.name,
-        data: line.data,
+        data,
         pointColors: line.pointColors,
         style,
         emphasis: isEmphasized,
@@ -195,7 +202,7 @@ export class ChartHost {
       return element;
     });
     this.elements.length = series.length;
-    const scales = `${request.axes.x.scale ?? "linear"}/${request.axes.y.scale ?? "linear"}`;
+    const scales = `${request.axes.x.scale ?? "linear"}/${request.axes.y.scale ?? "linear"}/${String(request.xReversed === true)}/${String(request.yReversed === true)}`;
     const labelsChanged =
       this.lastScales !== scales ||
       this.lastLabels === null ||
@@ -258,16 +265,16 @@ export class ChartHost {
       ),
     };
     this.chart.setViewRange({
-      x: {
-        min:
-          axisCoordinate(xRange.min, this.lastRequest?.axes.x.scale) - xOrigin,
-        max:
-          axisCoordinate(xRange.max, this.lastRequest?.axes.x.scale) - xOrigin,
-      },
-      y: {
-        min: axisCoordinate(yRange[0], this.lastRequest?.axes.y.scale),
-        max: axisCoordinate(yRange[1], this.lastRequest?.axes.y.scale),
-      },
+      x: directedRange(
+        axisCoordinate(xRange.min, this.lastRequest?.axes.x.scale) - xOrigin,
+        axisCoordinate(xRange.max, this.lastRequest?.axes.x.scale) - xOrigin,
+        this.lastRequest?.xReversed,
+      ),
+      y: directedRange(
+        axisCoordinate(yRange[0], this.lastRequest?.axes.y.scale),
+        axisCoordinate(yRange[1], this.lastRequest?.axes.y.scale),
+        this.lastRequest?.yReversed,
+      ),
     });
     this.lastLayout = this.makeLayout(xRange, yRange);
   }
@@ -379,15 +386,21 @@ export class ChartHost {
       type: "value",
       name: label,
       inside,
-      min: axisCoordinate(range.min, scale) - this.xOrigin,
-      max: axisCoordinate(range.max, scale) - this.xOrigin,
-      tickFormatter: (value) =>
-        scale === "log"
-          ? formatLogTick(
-              axisValue(value + this.xOrigin, scale),
-              this.xTickRange,
-            )
-          : this.xTickFormatter(value + this.xOrigin),
+      ...directedRange(
+        axisCoordinate(range.min, scale) - this.xOrigin,
+        axisCoordinate(range.max, scale) - this.xOrigin,
+        this.lastRequest?.xReversed,
+      ),
+      tickFormatter: (value) => {
+        const raw = axisValue(
+          (this.lastRequest?.xReversed === true ? -value : value) +
+            this.xOrigin,
+          scale,
+        );
+        return scale === "log"
+          ? formatLogTick(raw, this.xTickRange)
+          : this.xTickFormatter(raw);
+      },
     };
   }
 
@@ -403,12 +416,20 @@ export class ChartHost {
       type: "value",
       name: label,
       inside,
-      min: axisCoordinate(range[0], scale),
-      max: axisCoordinate(range[1], scale),
-      tickFormatter: (value) =>
-        scale === "log"
-          ? formatLogTick(axisValue(value, scale), this.yTickRange)
-          : this.yTickFormatter(value),
+      ...directedRange(
+        axisCoordinate(range[0], scale),
+        axisCoordinate(range[1], scale),
+        this.lastRequest?.yReversed,
+      ),
+      tickFormatter: (value) => {
+        const raw = axisValue(
+          this.lastRequest?.yReversed === true ? -value : value,
+          scale,
+        );
+        return scale === "log"
+          ? formatLogTick(raw, this.yTickRange)
+          : this.yTickFormatter(raw);
+      },
     };
   }
 
@@ -445,6 +466,8 @@ export class ChartHost {
     const grid = this.grid(this.lastAxisStyle);
     return {
       axisEqual: this.equalAxes(),
+      ...(this.lastRequest?.xReversed === true ? { xReversed: true } : {}),
+      ...(this.lastRequest?.yReversed === true ? { yReversed: true } : {}),
       ...(this.lastRequest?.axes.x.scale === "log"
         ? { xScale: "log" as const }
         : {}),
