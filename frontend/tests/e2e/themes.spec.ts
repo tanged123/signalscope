@@ -130,7 +130,7 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
                 getComputedStyle(row).borderTopColor ===
                   getComputedStyle(swatch).color;
               swatch.remove();
-              const base = element.getAttribute("type") === "search" ? 10 : 11;
+              const base = element.getAttribute("type") === "search" ? 11 : 12;
               const expected =
                 (base *
                   parseFloat(

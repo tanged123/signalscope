@@ -61,7 +61,7 @@ export function aggregateLegendStats(
 }
 
 export function statGridTemplate(columns: number): string {
-  return `minmax(128px, 1fr) minmax(56px, 1fr) repeat(${String(columns)}, 64px)`;
+  return `160px 56px repeat(${String(columns)}, calc((var(--plot-font-size) + 2) * 8px))`;
 }
 
 export function statSpanDomain(

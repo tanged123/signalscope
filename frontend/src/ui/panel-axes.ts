@@ -67,7 +67,7 @@ export class PanelAxes {
         ? "none"
         : xAxisLabel(state.color_axis.source, this.actions.catalog());
     const c = required<HTMLButtonElement>(this.element, ".panel-c-axis");
-    c.textContent = `c: ${cLabel} ▾`;
+    c.textContent = `color: ${cLabel} ▾`;
     c.title = `Color axis: ${cLabel}`;
     c.setAttribute("aria-label", `Color axis: ${cLabel}`);
   }
@@ -132,6 +132,6 @@ export class PanelAxes {
 export function axisControlsMarkup(): string {
   return `<button class="panel-toolbar-control panel-y-axis" type="button" title="Add Y signals or bundles" aria-label="Add Y signals or bundles">y: + add ▾</button>
     <button class="panel-toolbar-control panel-x-axis" type="button" title="Choose X axis">x: time ▾</button>
-    <button class="panel-toolbar-control panel-c-axis" type="button" title="Choose color axis">c: none ▾</button>
-    <button class="panel-toolbar-control panel-axis-limits" type="button" aria-label="Axis settings">axis ▾</button>`;
+    <button class="panel-toolbar-control panel-c-axis" type="button" title="Choose color axis">color: none ▾</button>
+    <button class="panel-toolbar-control panel-axis-limits" type="button" title="Axis limits, scales, direction, and equal units" aria-label="Axis settings">limits ▾</button>`;
 }

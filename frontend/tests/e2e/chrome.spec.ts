@@ -202,10 +202,10 @@ test("UI fonts and sizes apply consistently to controls, muted text, and the sig
       /^Inter,/,
     );
   }
-  await expect(page.locator(".signal-search")).toHaveCSS("font-size", "11px");
+  await expect(page.locator(".signal-search")).toHaveCSS("font-size", "12px");
   await expect(page.locator(".tree-empty").first()).toHaveCSS(
     "font-size",
-    "11px",
+    "12px",
   );
   await page.keyboard.press("Control+Comma");
   await expect(page.locator(".palette-hint").first()).toHaveCSS(
@@ -238,7 +238,7 @@ test("UI fonts and sizes apply consistently to controls, muted text, and the sig
       .locator(selector)
       .first()
       .evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
-    expect(size).toBeCloseTo((11 * 14) / 13, 3);
+    expect(size).toBeCloseTo((12 * 14) / 13, 3);
   }
   await page.locator(".panel-line-width").first().click();
   for (const selector of [

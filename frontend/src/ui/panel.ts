@@ -1,4 +1,5 @@
 import { lineToolbarMarkup } from "./line-toolbar";
+import { applySeriesRowState, seriesStateLabel } from "./series-row-state";
 import { PanelAxes } from "./panel-axes";
 import { legendColorControls, legendColorTarget } from "./legend-color-scale";
 import type { AxisLimits } from "./axis-limits";
@@ -1871,11 +1872,7 @@ export class PanelView {
     block.className = "plot-legend-row-block plot-legend-series-block";
     const row = document.createElement("div");
     row.className = "plot-legend-roster-row";
-    row.classList.toggle("focused", item.focused);
-    row.classList.toggle(
-      "ghosted",
-      item.series.display === "ghost" && !item.focused,
-    );
+    applySeriesRowState(row, item.series);
     const series = item.series;
     row.dataset.paths = JSON.stringify([series.path]);
     const swatch = document.createElement("button");
@@ -1897,10 +1894,11 @@ export class PanelView {
     const action = document.createElement("button");
     action.type = "button";
     action.className = "plot-legend-roster-action";
+    action.setAttribute("aria-pressed", String(item.focused));
     const label = document.createElement("span");
     label.className = "plot-legend-label";
     label.textContent = `${series.overridden ? "▍ " : ""}${series.path}`;
-    action.append(label);
+    action.append(label, seriesStateLabel(series));
     action.addEventListener("mouseenter", () => this.setEmphasis(series.path));
     action.addEventListener("mouseleave", () => this.setEmphasis(null));
     action.addEventListener("click", (event) => {
@@ -1959,6 +1957,12 @@ export class PanelView {
         this.callbacks.onClearFocus(this.id);
     });
     const renderRows = (): void => {
+      const rowHeight =
+        Number.parseFloat(
+          getComputedStyle(this.element).getPropertyValue(
+            "--legend-row-height",
+          ),
+        ) || 28;
       const all = seriesLegendRows(
         this.callbacks.catalog(),
         state,
@@ -1984,14 +1988,14 @@ export class PanelView {
         shown.length,
         rows.scrollTop,
         rows.clientHeight || 168,
-        24,
+        rowHeight,
       );
       viewport.style.height = `${String(slice.totalHeight)}px`;
       viewport.replaceChildren(
         ...shown.slice(slice.start, slice.end).map((item, offset) => {
           const block = this.plotLegendSeriesRow(state, item, shown);
           block.classList.add("virtual");
-          block.style.top = `${String(slice.topPadding + offset * 24)}px`;
+          block.style.top = `${String(slice.topPadding + offset * rowHeight)}px`;
           return block;
         }),
       );
@@ -2482,6 +2486,11 @@ export class PanelView {
 
     const body = document.createElement("div");
     body.className = "plot-stat-body";
+    body.addEventListener("scroll", () => {
+      const offset = `translateX(${String(-body.scrollLeft)}px)`;
+      header.style.transform = offset;
+      aggregateRow.style.transform = offset;
+    });
     body.addEventListener("click", (event) => {
       if (event.target === body) this.callbacks.onClearFocus(this.id);
     });
@@ -2489,8 +2498,7 @@ export class PanelView {
       const element = document.createElement("div");
       element.className = "plot-stat-row";
       element.dataset.paths = JSON.stringify([row.series.path]);
-      element.classList.toggle("muted", !row.series.visible);
-      element.classList.toggle("focused", row.series.focused);
+      applySeriesRowState(element, row.series);
       element.classList.toggle("overridden", row.series.overridden);
       element.style.gridTemplateColumns = grid;
       const identity = document.createElement("span");
@@ -2517,6 +2525,8 @@ export class PanelView {
       const label = document.createElement("button");
       label.type = "button";
       label.className = "plot-stat-label";
+      label.setAttribute("aria-pressed", String(row.series.focused));
+      label.title = row.series.path;
       label.textContent = row.series.path;
       if (row.series.overridden) {
         const marker = document.createElement("span");
@@ -2545,7 +2555,7 @@ export class PanelView {
             }),
           );
       });
-      identity.append(swatch, label);
+      identity.append(swatch, label, seriesStateLabel(row.series));
       element.append(
         identity,
         statSpan(row.values, spanDomain, seriesColor(row.series)),

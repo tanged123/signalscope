@@ -3,9 +3,10 @@ import { devices, expect, test as base, type Page } from "@playwright/test";
 const testBase = base.extend({
   page: async ({ playwright }, use, testInfo) => {
     await new Promise<void>((resolve) => setTimeout(resolve, 1_500));
-    const browser = await playwright.chromium.launch(
-      testInfo.project.use.launchOptions,
-    );
+    const browser = await playwright.chromium.launch({
+      ...testInfo.project.use.launchOptions,
+      headless: testInfo.project.use.headless ?? true,
+    });
     const { defaultBrowserType, ...desktop } = devices["Desktop Chrome"];
     void defaultBrowserType;
     const baseURL = testInfo.project.use.baseURL;

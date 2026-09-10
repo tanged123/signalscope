@@ -138,6 +138,9 @@ export function seriesInspector(
   const mute = document.createElement("button");
   mute.type = "button";
   mute.textContent = series.visible ? "⌫ mute" : "restore";
+  mute.title = series.visible
+    ? "Hide this trace; keep its focus and line properties"
+    : "Show this trace with its existing line properties";
   mute.addEventListener("click", () => actions.mute());
   footer.append(summary, mute);
   inspector.append(heading, color, line, footer);

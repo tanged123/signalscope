@@ -216,6 +216,14 @@ export function applyPreferences(
   target.style.setProperty("--font-plot", fontStack(prefs.plot_font_family));
   target.style.setProperty("--plot-font-size", String(prefs.plot_font_size));
   target.style.setProperty(
+    "--tree-row-height",
+    `${String(Math.max(22, prefs.ui_font_size * 2))}px`,
+  );
+  target.style.setProperty(
+    "--legend-row-height",
+    `${String(Math.max(28, Math.ceil((prefs.plot_font_size + 2) * 1.4 + 8)))}px`,
+  );
+  target.style.setProperty(
     "--plot-line-width-scale",
     String(prefs.plot_line_width_scale),
   );

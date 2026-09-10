@@ -2,7 +2,7 @@
   display: flex;
   min-height: 22px;
   max-height: 75%;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   flex-direction: column;
   overflow: hidden;
   border-top: 1px solid var(--border-faint);
@@ -98,8 +98,7 @@
 }
 
 .plot-tip-row.ghosted {
-  color: var(--fg-4);
-  opacity: 0.6;
+  color: var(--fg-2);
 }
 
 .plot-tip-rule {
@@ -181,6 +180,11 @@
 
 .plot-row-inspector-field {
   position: relative;
+  flex-wrap: wrap;
+}
+
+.plot-row-inspector-footer {
+  flex-wrap: wrap;
 }
 
 .plot-row-inspector-field.overridden {

@@ -440,7 +440,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
         );
         return {
           plotFamilyApplied: row.fontFamily.includes("JetBrains Mono"),
-          plotSizeApplied: row.fontSize === "10px",
+          plotSizeApplied: row.fontSize === "11px",
         };
       }),
     )
@@ -472,9 +472,9 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
       )
       .toEqual({
         titleFamily: true,
-        titleSize: 10,
+        titleSize: 11,
         optionFamily: true,
-        optionSize: 10,
+        optionSize: 11,
       });
     await page.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);

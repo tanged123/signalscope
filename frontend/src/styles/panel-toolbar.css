@@ -60,20 +60,16 @@
   flex-wrap: wrap;
   flex: none;
   align-items: center;
-  gap: 8px;
+  gap: 4px 6px;
   padding: 0 8px;
+}
+
+.panel-toolbar-group[role="group"] {
+  border-left: 1px solid var(--border);
 }
 
 .panel-toolbar-binding {
   flex: 0 1 auto;
-}
-
-.panel-toolbar-separator {
-  width: 1px;
-  height: 14px;
-  align-self: center;
-  flex: none;
-  background: var(--border);
 }
 
 .panel-toolbar-slot {
@@ -81,12 +77,16 @@
 }
 
 .panel-toolbar-control {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   color: var(--fg-2);
   border-radius: var(--radius-control);
   font: var(--ui-caption-size) var(--font-ui);
+  font-variant-numeric: tabular-nums;
 }
 
 .panel-toolbar-control {
@@ -123,7 +123,7 @@
 
 .panel-title {
   min-width: 42px;
-  max-width: 104px;
+  max-width: 140px;
   overflow: hidden;
   color: var(--fg-1);
   font: 600 var(--ui-text-size) var(--font-ui);
@@ -183,12 +183,17 @@
   min-width: 0;
   align-items: center;
   gap: 2px;
-  overflow: hidden;
+  flex-wrap: wrap;
 }
 
 .binding-chip {
-  display: inline-flex;
-  flex: none;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
   align-items: center;
   gap: 4px;
   padding: 2px 5px;
@@ -316,6 +321,16 @@
   display: flex;
   flex: none;
   margin-left: auto;
+  min-height: 26px;
+  align-items: center;
+}
+
+.panel-x-axis,
+.panel-c-axis {
+  display: block;
+  max-width: min(26ch, 100%);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gpu-warning {
