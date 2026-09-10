@@ -101,7 +101,8 @@ int main(void) {
   return iconv_close(converter);
 }
 C
-  /usr/bin/xcrun clang "$test_root/main.c" -liconv -o "$binary"
+  /usr/bin/xcrun clang "$test_root/main.c" -liconv \
+    -Wl,-headerpad_max_install_names -o "$binary"
   /usr/bin/install_name_tool -change /usr/lib/libiconv.2.dylib "$nix_iconv" \
     -add_rpath /nix/store/build-toolchain/lib "$binary"
   if "$script_dir/macos-server.sh" check "$binary" >/dev/null 2>&1; then
