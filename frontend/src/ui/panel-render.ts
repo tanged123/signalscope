@@ -15,6 +15,10 @@ export function preparePanelRender(
     | "y_label"
     | "color_axis"
     | "axis_equal"
+    | "x_scale"
+    | "y_scale"
+    | "x_reversed"
+    | "y_reversed"
   >,
   data: PanelLineResponse,
   window: { t0: number; t1: number },
@@ -30,6 +34,8 @@ export function preparePanelRender(
     xLabel: state.x_label,
     yLabel: state.y_label,
     colorAxis: state.color_axis,
+    xScale: state.x_scale ?? "linear",
+    yScale: state.y_scale ?? "linear",
   });
   const bySeries = new Map(state.series.map((series) => [series.path, series]));
   const styles: SeriesStroke[] = family.plotted.map((item) => {
@@ -55,6 +61,8 @@ export function preparePanelRender(
     makeRequest: (ranges: { x: Range; y: Range }): ChartRenderRequest => ({
       ...family.makeInput(ranges, styles),
       axisEqual: state.axis_equal === true,
+      xReversed: state.x_reversed === true,
+      yReversed: state.y_reversed === true,
       emphasisIndices,
       palette,
     }),

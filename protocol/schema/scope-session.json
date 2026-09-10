@@ -24,6 +24,7 @@
       "default": "none"
     },
     "AxisStyle": { "kind": "enum", "variants": ["gutter", "inline"] },
+    "AxisScale": { "kind": "enum", "variants": ["linear", "log"] },
     "DashStyle": { "kind": "enum", "variants": ["solid", "dash", "dot"] },
     "StatColumn": {
       "kind": "enum",
@@ -57,6 +58,7 @@
       "kind": "object",
       "fields": {
         "source": "SampleAxisSource",
+        "scale": "AxisScale?",
         "range": "f64[2]?",
         "label": "string?"
       }
@@ -154,6 +156,10 @@
         "title": "string",
         "axis_style": "AxisStyle",
         "axis_equal": "bool?",
+        "x_scale": "AxisScale?",
+        "y_scale": "AxisScale?",
+        "x_reversed": "bool?",
+        "y_reversed": "bool?",
         "bindings": "Binding[]",
         "color_by": "StyleDimension?",
         "dash_by": "StyleDimension?",

@@ -212,7 +212,11 @@ export class OverlayRenderer {
       context.lineWidth = 1.8;
       for (const point of cursorPoints) {
         const y = projectY(layout, point.value);
-        if (y < layout.plot.y || y > layout.plot.y + layout.plot.height) {
+        if (
+          !Number.isFinite(y) ||
+          y < layout.plot.y ||
+          y > layout.plot.y + layout.plot.height
+        ) {
           continue;
         }
         context.globalAlpha = point.alpha;

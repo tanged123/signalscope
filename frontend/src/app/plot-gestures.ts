@@ -1,5 +1,5 @@
 import type { PlotInteractionPolicy } from "./plot-capabilities";
-import type { Range, ZoomDragMode } from "./plot-math";
+import type { AxisScale, Range, ZoomDragMode } from "./plot-math";
 
 type StoredRanges = {
   x: readonly [number, number] | null;
@@ -74,12 +74,30 @@ export function resolveRanges(
   stored: StoredRanges,
   automatic: AutomaticRanges,
   window: { t0: number; t1: number },
+  scales: { x?: AxisScale | null; y?: AxisScale | null } = {},
 ): { x: Range; y: Range } | null {
-  const x =
+  let x =
     policy.xAxis === "linked-time"
       ? tupleRange([window.t0, window.t1])
       : tupleRange(stored.x ?? automatic.x);
-  const y = tupleRange(stored.y ?? automatic.y);
+  let y = tupleRange(stored.y ?? automatic.y);
+  const positive = (
+    range: Range | null,
+    automatic: readonly [number, number] | null,
+  ): Range => {
+    if (range !== null && range.min > 0) return range;
+    if (range !== null && range.max > 0) {
+      const min = automatic?.[0] ?? range.max / 1000;
+      if (min > 0 && min < range.max) return { min, max: range.max };
+    }
+    return tupleRange(automatic) ?? { min: 1, max: 10 };
+  };
+  if (scales.x === "log") x = positive(x, automatic.x);
+  if (scales.y === "log") y = positive(y, automatic.y);
+  if (scales.x === "log" || scales.y === "log") {
+    x ??= { min: 0, max: 1 };
+    y ??= { min: 0, max: 1 };
+  }
   return x === null || y === null ? null : { x, y };
 }
 

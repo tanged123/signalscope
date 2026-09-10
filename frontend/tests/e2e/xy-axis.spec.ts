@@ -229,6 +229,12 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await editor.getByLabel("X limits mode").selectOption("fixed");
     await editor.getByLabel("X minimum", { exact: true }).fill("0");
     await editor.getByLabel("X maximum", { exact: true }).fill("10");
+    await editor
+      .getByRole("checkbox", { name: "Flip horizontal", exact: true })
+      .check();
+    await editor
+      .getByRole("checkbox", { name: "Flip vertical", exact: true })
+      .check();
     await editor.getByLabel("Y limits mode").selectOption("fixed");
     await editor.getByLabel("Y minimum", { exact: true }).fill("1");
     await editor.getByLabel("Y maximum", { exact: true }).fill("8");
@@ -240,7 +246,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await equal.focus();
     await page.keyboard.press("Space");
     await expect(equal).toBeChecked();
-    await editor.getByRole("button", { name: "Apply limits" }).click();
+    await editor.getByRole("button", { name: "Apply", exact: true }).click();
     await expect(editor).toBeHidden();
     await expect(limitsButton).toBeFocused();
     await panel.locator(".panel-c-axis").click();
@@ -259,11 +265,11 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await panel.getByLabel("C limits mode").selectOption("fixed");
     await panel.getByLabel("C minimum", { exact: true }).fill("20");
     await panel.getByLabel("C maximum", { exact: true }).fill("10");
-    await panel.getByRole("button", { name: "Apply limits" }).click();
+    await panel.getByRole("button", { name: "Apply", exact: true }).click();
     await expect(panel.getByRole("alert")).toContainText("minimum less");
     await panel.getByLabel("C maximum", { exact: true }).fill("80");
     await editor.screenshot({ path: testInfo.outputPath("axis-limits.png") });
-    await panel.getByRole("button", { name: "Apply limits" }).click();
+    await panel.getByRole("button", { name: "Apply", exact: true }).click();
     await expect(colorbar).toHaveAttribute("aria-label", /20 to 80/);
     const legend = panel.locator(".plot-series-legend");
     await expect(legend.locator(".colorbar-canvas")).toBeVisible();
@@ -406,6 +412,39 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     expect(saved.tabs[0]?.panels[0]?.x_range).toEqual([0, 10]);
     expect(saved.tabs[0]?.panels[0]?.axis_equal).toBe(true);
     expect(saved.tabs[0]?.panels[0]?.y_range).toEqual([1, 8]);
+    await limitsButton.click();
+    for (const axis of ["X", "Y", "C"]) {
+      await editor
+        .getByLabel(`${axis} scale`, { exact: true })
+        .selectOption("log");
+    }
+    await expect(
+      editor.getByRole("checkbox", { name: "Axis equal", exact: true }),
+    ).toBeDisabled();
+    await editor.getByLabel("X limits mode").selectOption("fixed");
+    await editor.getByLabel("X minimum", { exact: true }).fill("1");
+    await editor.getByLabel("X maximum", { exact: true }).fill("10");
+    await editor.getByRole("button", { name: "Apply", exact: true }).click();
+    await expect(colorbar).toHaveAttribute(
+      "aria-label",
+      /logarithmic; 20 to 80/,
+    );
+    await expect
+      .poll(() => {
+        const state = JSON.parse(
+          readFileSync(pathToFileURL(workspacePath), "utf8"),
+        ) as Session;
+        const current = state.tabs[0]?.panels[0];
+        return [
+          current?.x_scale,
+          current?.y_scale,
+          current?.color_axis?.scale,
+          current?.x_reversed,
+          current?.y_reversed,
+        ];
+      })
+      .toEqual(["log", "log", "log", true, true]);
+    await page.screenshot({ path: testInfo.outputPath("xy-log-scales.png") });
     const snapshotPath = testInfo.outputPath("xy-color.html");
     await promisify(execFile)(
       join(root, "scripts/export.sh"),
@@ -447,8 +486,19 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     expect(offlineRequests).toEqual([]);
     await page.locator(".panel-axis-limits").click();
     await expect(
-      page.getByRole("checkbox", { name: "Axis equal", exact: true }),
+      page.getByRole("checkbox", { name: "Flip horizontal", exact: true }),
     ).toBeChecked();
+    await expect(
+      page.getByRole("checkbox", { name: "Flip vertical", exact: true }),
+    ).toBeChecked();
+    for (const axis of ["X", "Y", "C"]) {
+      await expect(
+        page.getByLabel(`${axis} scale`, { exact: true }),
+      ).toHaveValue("log");
+    }
+    await expect(
+      page.getByRole("checkbox", { name: "Axis equal", exact: true }),
+    ).toBeDisabled();
     await page.keyboard.press("Escape");
     await page.screenshot({
       path: testInfo.outputPath("xy-color-offline.png"),

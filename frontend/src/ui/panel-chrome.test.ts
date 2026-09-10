@@ -33,6 +33,10 @@ function state(): PanelState {
     title: "Panel",
     axis_style: "gutter",
     axis_equal: false,
+    x_scale: null,
+    y_scale: null,
+    x_reversed: null,
+    y_reversed: null,
     bindings: [{ kind: "query", selector: "*", refs: [], set_id: null }],
     color_by: "source",
     dash_by: null,
@@ -415,8 +419,8 @@ describe("PanelView chrome", () => {
     const request = render.mock.calls[0]?.[0];
     expect(request?.xRange).toEqual({ min: -5, max: 25 });
     expect(request?.axes).toEqual({
-      x: { label: "distance (m)" },
-      y: { label: "velocity (m/s)" },
+      x: { label: "distance (m)", scale: "linear" },
+      y: { label: "velocity (m/s)", scale: "linear" },
       style: "gutter",
     });
     expect(request?.series).toHaveLength(1);

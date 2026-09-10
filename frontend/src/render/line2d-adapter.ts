@@ -1,4 +1,4 @@
-import type { Range } from "../app/plot-math";
+import type { AxisScale, Range } from "../app/plot-math";
 import { DEFAULT_PANEL_LINE_WIDTH } from "../app/style-defaults";
 import type { Line2DRenderInput } from "./line2d";
 import type { SeriesStroke } from "./plot-theme";
@@ -10,6 +10,8 @@ export interface Line2DAdapterOptions {
   yLabel: string;
   styles?: readonly SeriesStroke[];
   axisStyle: "gutter" | "inline";
+  xScale?: AxisScale | null;
+  yScale?: AxisScale | null;
 }
 
 const DEFAULT_STROKE: SeriesStroke = {
@@ -30,8 +32,8 @@ export function line2DAxes(
   options: Line2DAdapterOptions,
 ): Line2DRenderInput["axes"] {
   return {
-    x: { label: options.xLabel },
-    y: { label: options.yLabel },
+    x: { label: options.xLabel, scale: options.xScale ?? "linear" },
+    y: { label: options.yLabel, scale: options.yScale ?? "linear" },
     style: options.axisStyle,
   };
 }

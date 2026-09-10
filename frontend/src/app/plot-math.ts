@@ -12,22 +12,34 @@ interface PlotRect {
   height: number;
 }
 
-export type AxisScale = "linear" | "log";
+export type { AxisScale } from "../generated/session";
+import type { AxisScale } from "../generated/session";
 
 export interface PlotLayout {
   axisEqual?: boolean;
   plot: PlotRect;
   xRange: Range;
   yRange: Range;
-  /** Absent means linear. Log axes clamp non-positive values to the floor. */
+  /** Absent means linear; non-positive log coordinates are not drawable. */
   xScale?: AxisScale;
+  yScale?: AxisScale;
+  xReversed?: boolean;
+  yReversed?: boolean;
 }
 
-/** Positive floor used so a log axis can survive a zero or negative bound. */
-const LOG_FLOOR = 1e-12;
-
 function logSpace(value: number): number {
-  return Math.log10(Math.max(LOG_FLOOR, value));
+  return value > 0 ? Math.log10(value) : NaN;
+}
+
+export function axisCoordinate(
+  value: number,
+  scale?: AxisScale | null,
+): number {
+  return scale === "log" ? logSpace(value) : value;
+}
+
+export function axisValue(value: number, scale?: AxisScale | null): number {
+  return scale === "log" ? 10 ** value : value;
 }
 
 export function clamp(value: number, min: number, max: number): number {
@@ -45,7 +57,17 @@ const EXTENT_PADDING = 0.06;
 export function paddedExtent(
   min: number,
   max: number,
+  scale?: AxisScale | null,
 ): [number, number] | null {
+  if (scale === "log") {
+    const extent = paddedExtent(logSpace(min), logSpace(max));
+    return extent === null
+      ? null
+      : [
+          Math.min(min, Math.max(Number.MIN_VALUE, 10 ** extent[0])),
+          Math.max(max, Math.min(Number.MAX_VALUE, 10 ** extent[1])),
+        ];
+  }
   if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
   if (min === max) return [min - 1, max + 1];
   const padding = (max - min) * EXTENT_PADDING;
@@ -54,39 +76,39 @@ export function paddedExtent(
 
 export function projectX(layout: PlotLayout, value: number): number {
   const { plot, xRange } = layout;
-  if (layout.xScale === "log") {
-    const min = logSpace(xRange.min);
-    const max = logSpace(xRange.max);
-    return plot.x + ((logSpace(value) - min) / (max - min)) * plot.width;
-  }
+  const min = axisCoordinate(xRange.min, layout.xScale);
+  const max = axisCoordinate(xRange.max, layout.xScale);
+  const fraction = (axisCoordinate(value, layout.xScale) - min) / (max - min);
   return (
-    plot.x + ((value - xRange.min) / (xRange.max - xRange.min)) * plot.width
+    plot.x + (layout.xReversed === true ? 1 - fraction : fraction) * plot.width
   );
 }
 
 export function projectY(layout: PlotLayout, value: number): number {
   const { plot, yRange } = layout;
+  const min = axisCoordinate(yRange.min, layout.yScale);
+  const max = axisCoordinate(yRange.max, layout.yScale);
+  const fraction = (axisCoordinate(value, layout.yScale) - min) / (max - min);
   return (
-    plot.y +
-    plot.height -
-    ((value - yRange.min) / (yRange.max - yRange.min)) * plot.height
+    plot.y + (layout.yReversed === true ? fraction : 1 - fraction) * plot.height
   );
 }
 
 export function invertX(layout: PlotLayout, px: number): number {
   const { plot, xRange } = layout;
-  if (layout.xScale === "log") {
-    const min = logSpace(xRange.min);
-    const max = logSpace(xRange.max);
-    return 10 ** (min + ((px - plot.x) / plot.width) * (max - min));
-  }
-  return xRange.min + ((px - plot.x) / plot.width) * (xRange.max - xRange.min);
+  const min = axisCoordinate(xRange.min, layout.xScale);
+  const max = axisCoordinate(xRange.max, layout.xScale);
+  const fraction = (px - plot.x) / plot.width;
+  return axisValue(
+    min + (layout.xReversed === true ? 1 - fraction : fraction) * (max - min),
+    layout.xScale,
+  );
 }
 
 /** Decade ticks covering `[min, max]`, empty when the range is unusable. */
 export function logTicks(min: number, max: number): number[] {
   if (!Number.isFinite(min) || !Number.isFinite(max) || max <= 0) return [];
-  const low = Math.floor(Math.log10(Math.max(LOG_FLOOR, min)));
+  const low = Math.floor(Math.log10(Math.max(Number.MIN_VALUE, min)));
   const high = Math.ceil(Math.log10(max));
   const values: number[] = [];
   for (let exponent = low; exponent <= high; exponent += 1) {
@@ -98,9 +120,12 @@ export function logTicks(min: number, max: number): number[] {
 
 export function invertY(layout: PlotLayout, py: number): number {
   const { plot, yRange } = layout;
-  return (
-    yRange.min +
-    ((plot.y + plot.height - py) / plot.height) * (yRange.max - yRange.min)
+  const min = axisCoordinate(yRange.min, layout.yScale);
+  const max = axisCoordinate(yRange.max, layout.yScale);
+  const fraction = (plot.y + plot.height - py) / plot.height;
+  return axisValue(
+    min + (layout.yReversed === true ? 1 - fraction : fraction) * (max - min),
+    layout.yScale,
   );
 }
 
@@ -149,7 +174,20 @@ export function zoomScaledRange(
     factor,
     logSpace(pivot),
   );
-  return { min: 10 ** next.min, max: 10 ** next.max };
+  return finiteLogRange(next, range);
+}
+
+/** Zooms around the visual midpoint, including on logarithmic axes. */
+export function zoomCenteredRange(
+  range: Range,
+  factor: number,
+  scale: AxisScale = "linear",
+): Range {
+  const pivot = axisValue(
+    (axisCoordinate(range.min, scale) + axisCoordinate(range.max, scale)) / 2,
+    scale,
+  );
+  return zoomScaledRange(range, factor, pivot, scale);
 }
 
 /** Pans by a fraction of the displayed span, preserving log positivity. */
@@ -164,7 +202,15 @@ export function panScaledRange(
   const logarithmic = { min: logSpace(range.min), max: logSpace(range.max) };
   const delta = fraction * (logarithmic.max - logarithmic.min);
   const next = panRange(logarithmic, delta);
-  return { min: 10 ** next.min, max: 10 ** next.max };
+  return finiteLogRange(next, range);
+}
+
+function finiteLogRange(next: Range, fallback: Range): Range {
+  const min = 10 ** next.min;
+  const max = 10 ** next.max;
+  return min > 0 && Number.isFinite(max) && min < max
+    ? { min, max }
+    : { ...fallback };
 }
 
 export type ZoomDragMode = "x" | "y" | "xy";

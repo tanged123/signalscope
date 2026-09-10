@@ -55,6 +55,20 @@ export interface TickRange {
 
 export type TickFormatter = (value: number) => string;
 
+export function formatLogTick(
+  value: number,
+  range: { min: number; max: number },
+): string {
+  const digits = Math.max(
+    4,
+    Math.min(
+      15,
+      Math.ceil(Math.log10(Math.abs(value) / (range.max - range.min))) + 3,
+    ),
+  );
+  return Number(value.toPrecision(digits)).toString();
+}
+
 export function hueIndex(hue: number, count = COLOR_SLOTS): number {
   return (Math.max(1, Math.trunc(hue)) - 1) % count;
 }

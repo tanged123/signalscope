@@ -34,7 +34,7 @@ import {
   type PlotLayout,
   type Range,
 } from "../app/plot-math";
-import { resolveRanges } from "../app/plot-gestures";
+import { resolvePanelRanges } from "./panel-ranges";
 import {
   type AnnotationAnchor,
   type PlotCursor,
@@ -523,10 +523,7 @@ export class PanelView {
       plotClick: (x, y, modifiers) => {
         this.plotClick(x, y, modifiers);
       },
-      setGesture: (hint) => {
-        this.element.classList.toggle("plot-interacting", hint !== null);
-        this.callbacks.onGesture(this.id, hint);
-      },
+      setGesture: (hint) => this.callbacks.onGesture(this.id, hint),
       setBox: (box) => {
         this.box = box;
         this.drawOverlay();
@@ -1045,24 +1042,7 @@ export class PanelView {
     window: { t0: number; t1: number },
     seriesKey = "",
   ): { x: Range; y: Range } | null {
-    let cached: ReturnType<PreparedPlot["autoRanges"]> | null = null;
-    const automatic = (): ReturnType<PreparedPlot["autoRanges"]> =>
-      (cached ??= plot.autoRanges());
-    const stickyY = plot.interaction.stickyAutoY
-      ? this.yAxis.resolve(seriesKey, () => automatic().y, state.y_range)
-      : automatic().y;
-    return resolveRanges(
-      plot.interaction,
-      {
-        x: state.x_range,
-        y: plot.interaction.stickyAutoY ? null : state.y_range,
-      },
-      {
-        x: plot.interaction.xAxis === "linked-time" ? null : automatic().x,
-        y: stickyY,
-      },
-      window,
-    );
+    return resolvePanelRanges(state, plot, window, this.yAxis, seriesKey);
   }
 
   invalidateTheme(): void {

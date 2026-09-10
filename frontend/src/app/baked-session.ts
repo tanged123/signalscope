@@ -24,8 +24,13 @@ export function parseBakedSession(sessionJson: string): Session {
       if (panel.color_axis != null) {
         panel.color_axis.range ??= null;
         panel.color_axis.label ??= null;
+        panel.color_axis.scale ??= null;
       }
       panel.axis_equal ??= false;
+      panel.x_scale ??= null;
+      panel.y_scale ??= null;
+      panel.x_reversed ??= null;
+      panel.y_reversed ??= null;
     }
   }
   return parsed;
@@ -111,12 +116,29 @@ function isColorAxis(value: unknown): boolean {
   return (
     isRecord(value) &&
     isSampleAxisSource(value.source) &&
+    isAxisScale(value.scale) &&
+    isLogRange(value.scale, value.range) &&
     (value.range == null ||
       (isNumberPair(value.range) &&
         Number.isFinite(value.range[0]) &&
         Number.isFinite(value.range[1]) &&
         value.range[0] < value.range[1])) &&
     (value.label == null || typeof value.label === "string")
+  );
+}
+
+function isAxisScale(value: unknown): boolean {
+  return value == null || value === "linear" || value === "log";
+}
+
+function isLogRange(scale: unknown, range: unknown): boolean {
+  return (
+    scale !== "log" ||
+    range == null ||
+    (isNumberPair(range) &&
+      range[0] > 0 &&
+      range[0] < range[1] &&
+      Number.isFinite(range[1]))
   );
 }
 
@@ -261,6 +283,12 @@ function isPanel(value: unknown): boolean {
     typeof value.title === "string" &&
     (value.axis_style === "gutter" || value.axis_style === "inline") &&
     (value.axis_equal == null || typeof value.axis_equal === "boolean") &&
+    (value.x_reversed == null || typeof value.x_reversed === "boolean") &&
+    (value.y_reversed == null || typeof value.y_reversed === "boolean") &&
+    isAxisScale(value.x_scale) &&
+    isAxisScale(value.y_scale) &&
+    isLogRange(value.x_scale, value.x_range) &&
+    isLogRange(value.y_scale, value.y_range) &&
     Array.isArray(value.bindings) &&
     value.bindings.every(isBinding) &&
     isNullable(value.color_by, isStyleDimension) &&

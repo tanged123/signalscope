@@ -7,7 +7,7 @@ export function shellMarkup(): string {
       <button class="menu-button" aria-label="Application menu" aria-haspopup="menu" aria-expanded="false">≡</button>
       <span class="brand">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 11 4 5l3 8 3-10 2 6 2-2" fill="none" stroke="var(--amber-7)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        SIGNALSCOPE
+        SignalScope
       </span>
       <button class="workspace-name" type="button" title="Rename session" aria-label="Rename session">Untitled</button>
     </div>

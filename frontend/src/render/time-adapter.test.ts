@@ -48,8 +48,8 @@ describe("time tile adapter", () => {
     });
     expect(input.series[0]?.data).toEqual(new Float32Array([0, 1, 1, 2]));
     expect(input.axes).toEqual({
-      x: { label: "time (s)" },
-      y: { label: "value (V)" },
+      x: { label: "time (s)", scale: "linear" },
+      y: { label: "value (V)", scale: "linear" },
       style: "gutter",
     });
   });

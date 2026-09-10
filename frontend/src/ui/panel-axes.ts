@@ -49,7 +49,8 @@ export class PanelAxes {
       () => actions.catalog(),
       () => actions.namedSets(),
       (source) => actions.selectX(source),
-      (source) => actions.selectColor({ source, range: null, label: null }),
+      (source) =>
+        actions.selectColor({ source, range: null, label: null, scale: null }),
     );
   }
 
@@ -100,7 +101,12 @@ export class PanelAxes {
       this.actions.namedSets(),
       (source) =>
         axis === "c"
-          ? this.actions.selectColor({ source, range: null, label: null })
+          ? this.actions.selectColor({
+              source,
+              range: null,
+              label: null,
+              scale: null,
+            })
           : this.actions.selectX(source),
       (paths) => this.actions.addY(paths),
       () => this.actions.selectColor(null),
@@ -127,5 +133,5 @@ export function axisControlsMarkup(): string {
   return `<button class="panel-toolbar-control panel-y-axis" type="button" title="Add Y signals or bundles" aria-label="Add Y signals or bundles">y: + add ▾</button>
     <button class="panel-toolbar-control panel-x-axis" type="button" title="Choose X axis">x: time ▾</button>
     <button class="panel-toolbar-control panel-c-axis" type="button" title="Choose color axis">c: none ▾</button>
-    <button class="panel-toolbar-control panel-axis-limits" type="button" aria-label="Axis limits">limits ▾</button>`;
+    <button class="panel-toolbar-control panel-axis-limits" type="button" aria-label="Axis settings">axis ▾</button>`;
 }

@@ -129,8 +129,8 @@ test("bundle queries preserve each run's coordinates through rendering, picking 
   const ranges = { x: { min: 0, max: 10 }, y: { min: 0, max: 10 } };
   const input = prepared.makeInput(ranges, []);
   expect(input.axes).toEqual({
-    x: { label: "x" },
-    y: { label: "y" },
+    x: { label: "x", scale: "linear" },
+    y: { label: "y", scale: "linear" },
     style: "gutter",
   });
   expect(Array.from(input.series[1]?.data ?? [])).toEqual([7, 1, 8, 2, 6, 5]);
@@ -292,6 +292,7 @@ test.each([".xy-drop-strip", ".panel-x-axis span", ".panel-c-axis span"])(
 
 test("C bundles match independently of X, reject missing/ambiguous members, and allow C=Y", () => {
   const color = {
+    scale: null,
     source: {
       kind: "bundle" as const,
       refs: [ref("one", "y"), ref("two", "y")],
@@ -369,6 +370,7 @@ test("C attributes survive save and clear without changing the categorical palet
   const workspace = new WorkspaceModel();
   const panel = workspace.addPanelRow();
   workspace.setPanelColorAxis(panel.id, {
+    scale: null,
     source: bundle,
     range: [0, 100],
     label: "temperature (K)",
@@ -377,6 +379,7 @@ test("C attributes survive save and clear without changing the categorical palet
   expect(restored.tabs[0]?.panels[0]?.color_axis).toEqual(panel.color_axis);
   expect(() =>
     workspace.setPanelColorAxis(panel.id, {
+      scale: null,
       source: bundle,
       range: [1, 1],
       label: null,

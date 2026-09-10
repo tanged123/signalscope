@@ -9,7 +9,7 @@
   --fg-1: #f0f0f0;
   --fg-2: #c4c4c4;
   --fg-3: #a0a0a0;
-  --fg-4: #808080;
+  --fg-4: #999999;
   --border-strong: #606060;
   --border: #444444;
   --border-faint: #333333;
@@ -26,8 +26,8 @@
   --surface-overlay: rgba(255, 255, 255, 0.9);
   --fg-1: #202020;
   --fg-2: #4c4c4c;
-  --fg-3: #6b6b6b;
-  --fg-4: #8a8a8a;
+  --fg-3: #616161;
+  --fg-4: #747474;
   --border-strong: #a0a0a0;
   --border: #c3c3c3;
   --border-faint: #e0e0e0;
@@ -50,6 +50,8 @@
   --border: #858585;
   --border-faint: #606060;
   --grid: #404040;
+  --elev-2: none;
+  --elev-3: none;
 }
 
 :is(:root, .theme-preview)[data-theme="contrast_light"] {
@@ -68,6 +70,8 @@
   --border: #707070;
   --border-faint: #909090;
   --grid: #b3b3b3;
+  --elev-2: none;
+  --elev-3: none;
 }
 
 .theme-choices {
@@ -81,7 +85,7 @@
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--border-strong);
-  border-radius: 3px;
+  border-radius: var(--radius-control);
   background: var(--surface-1);
   color: var(--fg-2);
   cursor: pointer;

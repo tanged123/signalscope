@@ -14,6 +14,13 @@ that are not settled by the current code or ADRs.
 - **Directional:** F1 (IA wireframe), F3 (stacked layout, inline axes, ⌘K open), F5 (legend), F6·1–5 (empty states, export dialog, annotations, XY drop strip, build order).
 
 ## Visual System (final)
+
+The September 9 appearance exploration refines typography, surface contrast,
+control corners, and legend chrome across the six existing themes. Its current
+rules and validation are recorded in
+[Workbench appearance](../../../frontend/src/styles/README.md). The original
+pixel references below document the earlier visual baseline; current controls
+and accepted ADRs remain authoritative for behavior.
 - **Ground — near-black.** App background `--surface-void #07090C`; panels + signal tree `--surface-0 #0E1116`; menu/toolbar/status/panel-header bars `--surface-1/2`. Flat surfaces, 1px `--border` seams (no floating cards), radii ≤4px, no glows/gradients.
 - **Chrome is fully achromatic** — grays only. Active toggles, mode pills, selections: `--surface-4` fill + `--fg-1` text. NEVER amber fills for chrome state.
 - **Amber (`--amber-7 #FFA226`) is interaction-only:** synced cursor, focused-panel 1px inset (`rgba(255,162,38,.5)`), Δ readouts, pinned MC run, ƒx/derived marks, drag-drop targets, XY cursor marker.

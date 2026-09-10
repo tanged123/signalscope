@@ -7,12 +7,15 @@ import {
   logTicks,
   panScaledRange,
   panRange,
+  paddedExtent,
   projectX,
+  projectY,
   valueAtTime,
   wheelZoomFactor,
   zoomDragMode,
   zoomRange,
   zoomScaledRange,
+  zoomCenteredRange,
   type PlotLayout,
 } from "./plot-math";
 
@@ -21,6 +24,34 @@ const layout: PlotLayout = {
   xRange: { min: 10, max: 60 },
   yRange: { min: -100, max: 100 },
 };
+
+test.each(["linear", "log"] as const)(
+  "reversed %s axes mirror projections and preserve original values",
+  (scale) => {
+    for (const xReversed of [false, true])
+      for (const yReversed of [false, true]) {
+        const view: PlotLayout = {
+          ...layout,
+          xScale: scale,
+          yScale: scale,
+          xRange: { min: 1, max: 100 },
+          yRange: { min: 1, max: 100 },
+          xReversed,
+          yReversed,
+        };
+        expect(projectX(view, 1)).toBe(
+          layout.plot.x + (xReversed ? layout.plot.width : 0),
+        );
+        expect(projectY(view, 1)).toBe(
+          layout.plot.y + (yReversed ? 0 : layout.plot.height),
+        );
+        for (const value of [1, 3, 10, 100]) {
+          expect(invertX(view, projectX(view, value))).toBeCloseTo(value, 9);
+          expect(invertY(view, projectY(view, value))).toBeCloseTo(value, 9);
+        }
+      }
+  },
+);
 
 function bin(
   t0: number,
@@ -63,7 +94,22 @@ test("zooms log axes in decade space", () => {
   const zoomed = zoomScaledRange({ min: 1, max: 1000 }, 0.5, 10, "log");
   expect(zoomed.min).toBeCloseTo(Math.sqrt(10));
   expect(zoomed.max).toBeCloseTo(100);
+  expect(zoomCenteredRange({ min: 1, max: 10000 }, 0.5, "log")).toEqual({
+    min: 10,
+    max: 1000,
+  });
 });
+
+test.each([Number.MIN_VALUE, Number.MAX_VALUE])(
+  "log padding keeps extreme finite value %s inside its extent",
+  (value) => {
+    const range = paddedExtent(value, value, "log");
+    expect(range?.[0]).toBeGreaterThan(0);
+    expect(range?.[0]).toBeLessThanOrEqual(value);
+    expect(range?.[1]).toBeGreaterThanOrEqual(value);
+    expect(Number.isFinite(range?.[1])).toBe(true);
+  },
+);
 
 test("pans log axes in decade space", () => {
   const panned = panScaledRange({ min: 1, max: 100 }, 0.5, "log");
@@ -87,6 +133,24 @@ test("projects and inverts a log x axis", () => {
 test("emits decade ticks for a log range", () => {
   expect(logTicks(0.5, 1200)).toEqual([1, 10, 100, 1000]);
   expect(logTicks(0, -1)).toEqual([]);
+});
+
+test("log Y projection and inversion agree and exclude non-positive coordinates", () => {
+  const logLayout: PlotLayout = {
+    ...layout,
+    xScale: "log",
+    yScale: "log",
+    xRange: { min: 1, max: 1000 },
+    yRange: { min: 1, max: 1000 },
+  };
+  expect(projectY(logLayout, 10)).toBeCloseTo(layout.plot.y + 200);
+  expect(invertY(logLayout, layout.plot.y + 100)).toBeCloseTo(100);
+  expect(projectY(logLayout, 0)).toBeNaN();
+  expect(projectX(logLayout, -1)).toBeNaN();
+  expect(panScaledRange({ min: 1, max: 100 }, 1000, "log")).toEqual({
+    min: 1,
+    max: 100,
+  });
 });
 
 test("zoom drags snap only strongly directional rectangles to one axis", () => {

@@ -28,8 +28,8 @@
   max-width: min(50vw, 480px);
   height: 22px;
   padding: 0 5px;
-  border-radius: 2px;
-  font: var(--ui-text-size) var(--font-ui);
+  border-radius: var(--radius-control);
+  font: 500 var(--ui-text-size) var(--font-ui);
 }
 
 .workspace-name {
@@ -98,7 +98,7 @@
   max-height: calc(100vh - 40px);
   padding: 0;
   border: 1px solid var(--border-strong);
-  border-radius: 3px;
+  border-radius: var(--radius-overlay);
   background: var(--surface-1);
   color: var(--fg-2);
   font: var(--ui-body-size) var(--font-ui);
@@ -116,7 +116,7 @@
   justify-content: space-between;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface-0);
 }
 
 .info-dialog header button {

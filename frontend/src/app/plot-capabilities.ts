@@ -13,6 +13,7 @@ import {
   projectX,
   projectY,
   type PlotLayout,
+  type AxisScale,
 } from "./plot-math";
 
 interface PlotPoint {
@@ -121,6 +122,8 @@ interface PreparedSeries {
 }
 
 export interface TimePlotInput {
+  xScale?: AxisScale | null;
+  yScale?: AxisScale | null;
   series: readonly (PreparedSeries & { bins: BinColumns })[];
   window: { t0: number; t1: number };
 }
@@ -143,6 +146,8 @@ interface Line2DPlotSeries {
  * rows are never joined by their plotted X values.
  */
 export interface Line2DPlotInput {
+  xScale?: AxisScale | null;
+  yScale?: AxisScale | null;
   linkedTime?: boolean | undefined;
   anchor: Float64Array;
   x: Float64Array;
@@ -177,7 +182,7 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
   let extents: SeriesExtent[] | null = null;
   const seriesExtents = (): SeriesExtent[] =>
     (extents ??= input.series.map((series) =>
-      columnsYExtent(series.bins, input.window),
+      columnsYExtent(series.bins, input.window, input.yScale === "log"),
     ));
   const resolve = (annotation: Annotation): ResolvedAnnotation | null => {
     const series = input.series.find(
@@ -215,7 +220,27 @@ export function prepareTimePlot(input: TimePlotInput): PreparedPlot {
         min = Math.min(min, extent.min);
         max = Math.max(max, extent.max);
       }
-      const y = paddedExtent(min, max);
+      const y = paddedExtent(min, max, input.yScale);
+      if (input.xScale === "log") {
+        let xMin = Infinity;
+        let xMax = -Infinity;
+        for (const { bins } of input.series) {
+          for (let i = 0; i < bins.count; i += 1) {
+            if (bins.finiteCount[i] === 0) continue;
+            for (const x of [
+              bins.t0[i] as number,
+              bins.t1[i] as number,
+              ((bins.t0[i] as number) + (bins.t1[i] as number)) / 2,
+            ]) {
+              if (x > 0 && x >= input.window.t0 && x <= input.window.t1) {
+                xMin = Math.min(xMin, x);
+                xMax = Math.max(xMax, x);
+              }
+            }
+          }
+        }
+        return { x: paddedExtent(xMin, xMax, "log"), y };
+      }
       return y === null
         ? { x: null, y: null }
         : { x: [input.window.t0, input.window.t1], y };
@@ -378,8 +403,8 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
         yMax = Math.max(yMax, extent.yMax);
       }
       return {
-        x: paddedExtent(xMin, xMax),
-        y: paddedExtent(yMin, yMax),
+        x: paddedExtent(xMin, xMax, input.xScale),
+        y: paddedExtent(yMin, yMax, input.yScale),
       };
     },
     cursorAt(layout, point) {
@@ -514,6 +539,8 @@ interface XYPoint {
 }
 
 interface Line2DExtent {
+  xScale: AxisScale;
+  yScale: AxisScale;
   anchor: Float64Array;
   x: Float64Array;
   t0: number;
@@ -538,11 +565,15 @@ function line2DExtent(
   if (
     cached?.anchor === anchor &&
     cached.x === x &&
+    cached.xScale === (input.xScale ?? "linear") &&
+    cached.yScale === (input.yScale ?? "linear") &&
     cached.t0 === t0 &&
     cached.t1 === t1
   )
     return cached;
   const extent = {
+    xScale: input.xScale ?? "linear",
+    yScale: input.yScale ?? "linear",
     anchor,
     x,
     t0,
@@ -560,7 +591,9 @@ function line2DExtent(
       !(t >= t0 && t <= t1) ||
       !Number.isFinite(t) ||
       !Number.isFinite(xv) ||
-      !Number.isFinite(yv)
+      !Number.isFinite(yv) ||
+      (input.xScale === "log" && xv <= 0) ||
+      (input.yScale === "log" && yv <= 0)
     )
       continue;
     extent.xMin = Math.min(extent.xMin, xv);

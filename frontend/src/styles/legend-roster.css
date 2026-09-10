@@ -1,0 +1,352 @@
+.plot-override-heading,
+.plot-override-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.plot-override-heading button,
+.plot-override-row button {
+  color: var(--fg-3);
+  font: inherit;
+}
+
+.plot-override-row {
+  grid-template-columns: minmax(0, 1fr) auto 16px;
+  padding-top: 3px;
+  color: var(--fg-2);
+}
+
+.plot-override-row > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot-override-row > :nth-child(2) {
+  color: var(--fg-4);
+}
+
+.plot-legend-hint {
+  color: var(--fg-4);
+  font-size: var(--ui-caption-size);
+}
+
+.plot-legend-search-wrap {
+  padding: 8px;
+}
+
+.plot-legend-search {
+  font-size: var(--ui-caption-size);
+}
+
+.plot-legend-search-meta,
+.plot-legend-section-title {
+  color: var(--fg-4);
+  font-size: var(--ui-caption-size);
+}
+
+.plot-legend-search-meta {
+  padding: 4px 2px 0;
+}
+
+.plot-legend-section-title {
+  padding: 3px 7px 2px;
+  letter-spacing: 0.04em;
+}
+
+.plot-legend-group {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.plot-legend-group.collapsed {
+  flex: 0 0 auto;
+}
+
+.plot-legend-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  background: var(--surface-1);
+  border-top: 1px solid var(--border-faint);
+  border-bottom: 1px solid var(--border-faint);
+  color: var(--fg-2);
+  font: 600 var(--ui-caption-size) var(--font-ui);
+  letter-spacing: 0.04em;
+}
+
+.plot-legend-signals-toggle {
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.plot-legend-signals-toggle:hover,
+.plot-legend-signals-toggle:focus-visible {
+  color: var(--fg-1);
+}
+
+.plot-legend-focus-filter {
+  margin-left: auto;
+  padding: 1px 5px;
+  border-radius: var(--radius-control);
+  color: var(--amber-7);
+  font: inherit;
+  letter-spacing: 0;
+}
+
+.plot-legend-focus-filter:hover,
+.plot-legend-focus-filter:focus-visible {
+  background: var(--amber-3);
+  color: var(--fg-1);
+}
+
+.plot-series-legend[data-state="rail"] .plot-legend-footer {
+  padding: 7px 10px;
+}
+
+.plot-legend-roster-rows {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.plot-legend-roster-viewport {
+  position: relative;
+}
+
+.plot-legend-series-block.virtual {
+  position: absolute;
+  left: 0;
+  width: 100%;
+}
+
+.plot-legend-roster-row {
+  display: grid;
+  width: 100%;
+  height: 24px;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  color: var(--fg-2);
+  font: inherit;
+  text-align: left;
+}
+
+.plot-legend-roster-row.focused,
+.plot-stat-row.focused,
+.plot-tip-row.focused {
+  background: var(--amber-3);
+  box-shadow: inset 2px 0 var(--amber-7);
+  color: var(--fg-1);
+}
+
+.plot-legend-roster-row.ghosted {
+  color: var(--fg-4);
+}
+
+.plot-legend-roster-row.ghosted .plot-legend-label {
+  text-decoration: line-through;
+}
+
+:is(.plot-legend-roster-row, .plot-stat-row, .plot-tip-row).cross-highlight {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+:is(
+    .plot-legend-roster-row,
+    .plot-stat-row,
+    .plot-tip-row
+  ).focused.cross-highlight {
+  background: var(--amber-3);
+}
+
+.plot-legend-roster-action {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.plot-legend-stats {
+  min-width: 0;
+}
+
+.plot-stat-header,
+.plot-stat-row {
+  display: grid;
+  min-width: max-content;
+  align-items: center;
+}
+
+.plot-stat-header {
+  min-height: 22px;
+  flex: none;
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-3);
+  font: var(--ui-caption-size) var(--font-ui);
+  letter-spacing: 0.04em;
+}
+
+.plot-stat-series-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 7px;
+}
+
+.plot-stat-span-header {
+  min-width: 56px;
+}
+
+.plot-stat-column-picker,
+.plot-stat-sort {
+  min-height: 22px;
+  padding: 2px 5px;
+  color: inherit;
+  font: inherit;
+  text-align: right;
+}
+
+.plot-stat-sort:hover,
+.plot-stat-sort:focus-visible,
+.plot-stat-sort.active,
+.plot-stat-column-picker:hover,
+.plot-stat-column-picker:focus-visible {
+  background: var(--surface-3);
+  color: var(--amber-7);
+}
+
+.plot-stat-sort:disabled {
+  background: transparent;
+  color: var(--fg-4);
+  cursor: not-allowed;
+}
+
+.plot-stat-aggregate {
+  min-height: 21px;
+  flex: none;
+  background: var(--surface-1);
+  color: var(--fg-1);
+}
+
+.plot-stat-aggregate > :first-child {
+  padding: 2px 7px;
+  color: var(--fg-4);
+  font-size: var(--ui-caption-size);
+  letter-spacing: 0.04em;
+}
+
+.plot-stat-body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.plot-stat-row {
+  min-height: 22px;
+  color: var(--fg-2);
+}
+
+.plot-stat-row:hover {
+  background: var(--surface-3);
+  color: var(--fg-1);
+}
+
+.plot-stat-row.focused:hover {
+  background: var(--amber-3);
+}
+
+.plot-stat-row.muted {
+  color: var(--fg-4);
+}
+
+.plot-stat-row.muted .plot-stat-label {
+  text-decoration: line-through;
+}
+
+.plot-stat-identity {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+}
+
+.plot-stat-label {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot-stat-cell {
+  padding: 2px 5px;
+  color: inherit;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.plot-stat-span {
+  min-width: 56px;
+  padding: 0 7px;
+}
+
+.plot-stat-span-track {
+  position: relative;
+  display: block;
+  height: 5px;
+  background: var(--surface-3);
+}
+
+.plot-stat-span-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: currentcolor;
+  opacity: 0.55;
+}
+
+.plot-stat-span-mean {
+  position: absolute;
+  top: -2px;
+  width: 1px;
+  height: 9px;
+  background: var(--fg-1);
+}
+
+.plot-stat-histogram {
+  display: flex;
+  height: 11px;
+  align-items: flex-end;
+  gap: 1px;
+  padding: 0 7px;
+}
+
+.plot-stat-histogram > span {
+  min-height: 1px;
+  flex: 1;
+  background: var(--fg-4);
+}
+
+.plot-stat-unit {
+  color: var(--fg-4);
+}
