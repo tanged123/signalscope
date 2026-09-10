@@ -29,14 +29,10 @@ export function showAxisLimits(
   form.className = "panel-config-popover axis-limits-editor";
   form.setAttribute("role", "dialog");
   form.setAttribute("aria-label", "Axis limits");
-  const title = document.createElement("div");
-  title.className = "panel-config-title";
-  title.textContent = "AXIS LIMITS";
-  form.append(title);
   const labels = document.createElement("details");
   labels.className = "axis-limits-labels";
   const summary = document.createElement("summary");
-  summary.textContent = "Axis labels";
+  summary.textContent = "Labels";
   labels.append(summary);
   const controls = new Map<
     string,
@@ -81,7 +77,7 @@ export function showAxisLimits(
     scale.setAttribute("aria-label", `${name} scale`);
     for (const [value, text] of [
       ["linear", "Linear"],
-      ["log", "Logarithmic (base 10)"],
+      ["log", "Logarithmic"],
     ]) {
       const option = document.createElement("option");
       option.value = value ?? "";
@@ -145,7 +141,7 @@ export function showAxisLimits(
       reversed.checked = state[`${dimension}_reversed`] === true;
       toggle.append(
         reversed,
-        dimension === "x" ? "Flip horizontal (X)" : "Flip vertical (Y)",
+        dimension === "x" ? "Flip horizontal" : "Flip vertical",
       );
       fieldset.append(toggle);
     }
@@ -161,29 +157,17 @@ export function showAxisLimits(
   form.append(equalLabel);
   const equalNote = document.createElement("div");
   equalNote.className = "axis-limits-note";
+  equalNote.textContent = "Linear X/Y only.";
   const updateEqual = (): void => {
     equal.disabled =
       controls.get("x")?.scale.value === "log" ||
       controls.get("y")?.scale.value === "log";
     if (equal.disabled) equal.checked = false;
-    equalNote.textContent = equal.disabled
-      ? "Axis equal requires linear X and Y scales."
-      : "Equal X/Y units per pixel; expands limits to fit.";
+    equalNote.hidden = !equal.disabled;
   };
   form.addEventListener("change", updateEqual);
   updateEqual();
   form.append(equalNote, labels);
-  const logNote = document.createElement("div");
-  logNote.className = "axis-limits-note";
-  logNote.textContent =
-    "Log scales use positive values. Non-positive X/Y values break lines; non-positive C values use a neutral color.";
-  form.append(logNote);
-  if (state.x_axis.kind === "time") {
-    const note = document.createElement("div");
-    note.className = "axis-limits-note";
-    note.textContent = "Time limits follow the panel’s link setting.";
-    form.append(note);
-  }
   const error = document.createElement("div");
   error.setAttribute("role", "alert");
   form.append(error);
@@ -196,7 +180,7 @@ export function showAxisLimits(
   };
   const actions = document.createElement("div");
   actions.className = "axis-limits-actions";
-  for (const text of ["Apply limits", "Cancel"]) {
+  for (const text of ["Apply", "Cancel"]) {
     const button = document.createElement("button");
     button.type = text === "Cancel" ? "button" : "submit";
     button.textContent = text;

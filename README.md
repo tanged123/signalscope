@@ -16,11 +16,11 @@ Use **c:** to color each line along its length by another signal, a source-match
 bundle, or time. The labeled horizontal scale lives in the legend and shares
 one range across the panel. When the legend is collapsed it remains visible
 as a compact plot inset; neither placement adds a plot gutter.
-The shared **axis** dropdown edits X, Y, and C ranges and labels together,
+The compact **axis** dropdown edits X, Y, and C ranges and labels together,
 with automatic or fixed limits and **Linear / Logarithmic (base 10)** scales
 per axis. Log scales use positive values: non-positive X/Y samples break lines,
 and non-positive C samples use a neutral color. **Axis equal** requires linear
-X and Y. **Flip horizontal (X)** and **Flip vertical (Y)** independently reverse
+X and Y. **Flip horizontal** and **Flip vertical** independently reverse
 the displayed axes with either scale. Limits remain minimum-to-maximum in original
 units. Scales and flips persist in sessions and offline snapshots.
 For time X, **Fit data** fits the
