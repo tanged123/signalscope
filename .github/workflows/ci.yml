@@ -170,6 +170,8 @@ jobs:
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cargo-cache-key: build
+      - if: matrix.platform == 'mac'
+        run: ./scripts/macos-server.test.sh
       - if: matrix.platform != 'windows'
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}

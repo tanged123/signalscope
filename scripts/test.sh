@@ -66,6 +66,7 @@ test_desktop() {
   if [ "$(uname -s)" = Darwin ]; then
     packaged_resources="$(dirname "$packaged_bin")/../Resources"
     packaged_app="$packaged_resources/app.asar"
+    "$signalscope_scripts_dir/macos-server.sh" check "$packaged_resources/bin/scope-server"
   fi
   if [ "$(uname -s)" = Linux ] &&
     grep -q 'not found' <<<"$(ldd "$packaged_bin" 2>/dev/null || true)" &&

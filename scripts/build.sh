@@ -130,6 +130,9 @@ package_app() {
   pnpm --filter @signalscope/desktop build
   build_server_release
   node desktop/scripts/stage.mjs
+  if [ "$platform" = mac ]; then
+    "$signalscope_scripts_dir/macos-server.sh" prepare build/desktop-stage/bin/scope-server
+  fi
   node desktop/scripts/clean.mjs --release
   pnpm --filter @signalscope/desktop exec electron-builder \
     --config electron-builder.yml "${builder_args[@]}" "$@"
