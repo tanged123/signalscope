@@ -32,10 +32,28 @@ Packaging starts from a fresh stage containing only the current
 stale, nested, or symlinked artifacts and generates SHA-256 checksums before
 tagging.
 
+Demo publication follows successful tagged releases. Its deployment job uses
+the authenticated GitHub artifact API with `actions: read` to retrieve the
+current run's demo before publishing Pages. Package failures prevent both a
+new release and a demo deployment, leaving the previous demo available.
+
 Linux `scope-server` artifacts target the Ubuntu 22.04 glibc 2.35 baseline.
 HDF5 and zlib are linked statically, while the optional Wayland client is
 loaded at runtime. The package gate rejects newer glibc symbols and native
 dependencies outside the baseline runtime.
+
+macOS packaging prepares the staged server before Electron signing: the pinned
+Nix Apple libiconv 115.100.1 reference is replaced with
+`/usr/lib/libiconv.2.dylib`, Nix runtime search paths are removed, and the modified
+binary receives a fresh ad-hoc signature. Other non-system dependencies fail
+packaging rather than being guessed or bundled. `scripts/macos-server.sh` owns
+this check and runs again on the packaged server before its smoke test. The
+stage is disposable and recreated for each package; Cargo outputs are untouched.
+This fixes [issue 34](https://github.com/tanged123/signalscope/issues/34) without
+changing application APIs or adding user-installed runtime dependencies.
+Shell regression tests cover remapping, rejection, and signing order; the macOS
+build job also exercises a real Mach-O binary using iconv. Revisit the explicit
+mapping when the pinned Nix libiconv changes.
 
 Windows certificate secrets retain the existing convention. macOS Developer
 ID and notarization credentials are all-or-nothing. Unsigned packages are

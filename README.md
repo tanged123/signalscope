@@ -55,6 +55,7 @@ choose a version from [all release tags](https://github.com/tanged123/signalscop
 Release assets include `SHA256SUMS.txt` for verification. Rendering requires a
 WebGPU-capable system. Linux packages support the Ubuntu 22.04 glibc 2.35
 baseline and newer distributions.
+macOS packages use system libraries; Nix is only a build-time dependency.
 
 ## Build and run
 
