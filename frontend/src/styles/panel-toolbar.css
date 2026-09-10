@@ -17,6 +17,7 @@
   flex-direction: column;
   background: var(--surface-0);
   border: 1px solid var(--border);
+  outline: 0;
   container-name: panel;
   container-type: inline-size;
 }

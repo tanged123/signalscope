@@ -63,10 +63,14 @@ test("maximize fills the workspace and split restores the layout", async ({
   const maximized = page.locator(".panel.maximized");
   const after = await maximized.boundingBox();
   const panelBarBox = await panelBar.boundingBox();
+  const tabStripBox = await page.locator(".workspace-strip").boundingBox();
   if (after === null)
     throw new Error("maximized panel geometry is unavailable");
   if (panelBarBox === null)
     throw new Error("maximized panel bar geometry is unavailable");
+  expect(tabStripBox?.x).toBe(after.x);
+  expect(tabStripBox?.width).toBe(after.width);
+  expect(panelBarBox.x).toBe(after.x);
   expect(after.height).toBeGreaterThan(before.height + 100);
   expect(
     Math.abs(after.height + panelBarBox.height - workspaceBox.height),

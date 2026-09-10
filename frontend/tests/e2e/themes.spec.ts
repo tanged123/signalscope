@@ -1,6 +1,35 @@
 import { expect, gotoApp, test } from "./fixtures";
 import { THEME_ORDER } from "../../src/app/themes";
 
+test("panel focus stays quiet and legends stay opaque during navigation", async ({
+  page,
+}) => {
+  await gotoApp(page);
+  const panel = page.locator(".panel").first();
+  const overlay = panel.locator(".overlay-canvas");
+  const legend = panel.locator(".plot-series-legend");
+  await expect(legend).toBeVisible();
+  await overlay.click({ modifiers: ["Shift"], position: { x: 100, y: 100 } });
+  await expect(panel).toBeFocused();
+  await expect(panel).toHaveCSS("outline-style", "none");
+  await page.mouse.wheel(0, -100);
+  await expect(page.locator(".gesture-hint")).toHaveText("wheel: zoom");
+  await expect(legend).toHaveCSS("opacity", "1");
+  await expect(page.locator(".gesture-hint")).toHaveText("");
+  await page.mouse.down({ button: "right" });
+  const bounds = await overlay.boundingBox();
+  if (bounds === null) throw new Error("missing plot geometry");
+  await page.mouse.move(bounds.x + 140, bounds.y + 120);
+  await expect(page.locator(".gesture-hint")).toHaveText("drag: pan");
+  await expect(legend).toHaveCSS("opacity", "1");
+  await page.mouse.up({ button: "right" });
+  await expect(page.locator(".gesture-hint")).toHaveText("");
+  const control = panel.locator(".panel-axis-limits");
+  await page.keyboard.press("Tab");
+  await control.focus();
+  await expect(control).toHaveCSS("outline-style", "solid");
+});
+
 test("named theme selection and T cycling preserve plot colors", async ({
   page,
 }) => {

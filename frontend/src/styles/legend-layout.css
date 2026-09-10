@@ -201,10 +201,6 @@
   display: none;
 }
 
-.panel.plot-interacting .plot-series-legend:not(:hover) {
-  opacity: 0.4;
-}
-
 .plot-series-legend[hidden] {
   display: none;
 }

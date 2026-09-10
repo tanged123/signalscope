@@ -17,9 +17,11 @@ actions, and mobile layouts are not part of this pass.
   retain their existing plot font. UI caption sizes scale with the UI preference.
 - Panel headers and legend section headers use the first raised surface. Binding
   chips have their own quiet boundary; toolbar dividers separate groups without
-  full-height boxes. Floating legends have opaque backgrounds for readable data.
+  full-height boxes. Floating legends stay opaque during pan and zoom for readable
+  data. Workspace tabs align with the panel and maximized-panel bar seams.
 - Hover and selection use neutral surfaces. Amber keeps its interaction meaning,
-  including search focus. Essential keyboard controls have a visible focus edge.
+  including search focus. Essential keyboard controls have a visible focus edge;
+  focusing a whole panel does not add a surrounding highlight.
   Reduced motion disables the existing short control transitions.
 - Dark and Light have revised surface and text steps. Graphite and Paper retain
   neutral palettes with clearer secondary text. Both high-contrast themes retain

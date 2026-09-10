@@ -153,6 +153,7 @@ button {
   grid-area: tabs;
   display: flex;
   min-width: 0;
+  margin-inline: 1px;
   background: var(--surface-1);
   border-width: 0 0 1px;
 }

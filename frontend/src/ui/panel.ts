@@ -523,10 +523,7 @@ export class PanelView {
       plotClick: (x, y, modifiers) => {
         this.plotClick(x, y, modifiers);
       },
-      setGesture: (hint) => {
-        this.element.classList.toggle("plot-interacting", hint !== null);
-        this.callbacks.onGesture(this.id, hint);
-      },
+      setGesture: (hint) => this.callbacks.onGesture(this.id, hint),
       setBox: (box) => {
         this.box = box;
         this.drawOverlay();
