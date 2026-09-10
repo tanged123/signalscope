@@ -32,6 +32,11 @@ Packaging starts from a fresh stage containing only the current
 stale, nested, or symlinked artifacts and generates SHA-256 checksums before
 tagging.
 
+Demo publication follows successful tagged releases. Its deployment job uses
+the authenticated GitHub artifact API with `actions: read` to retrieve the
+current run's demo before publishing Pages. Package failures prevent both a
+new release and a demo deployment, leaving the previous demo available.
+
 Linux `scope-server` artifacts target the Ubuntu 22.04 glibc 2.35 baseline.
 HDF5 and zlib are linked statically, while the optional Wayland client is
 loaded at runtime. The package gate rejects newer glibc symbols and native

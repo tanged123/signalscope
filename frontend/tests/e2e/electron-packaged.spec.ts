@@ -65,6 +65,9 @@ test("the packaged window integrates chrome and uses authenticated HttpPlane", a
   });
   try {
     const page = await application.firstWindow();
+    await expect(page.locator("#app")).toHaveAttribute("data-ready", "true", {
+      timeout: 20_000,
+    });
     await expect(page.locator(".formula-toggle")).toBeVisible();
     const nativeWindow = (await application.browserWindow(
       page,
@@ -105,11 +108,21 @@ test("the packaged window integrates chrome and uses authenticated HttpPlane", a
     await page.locator(".menu-button").focus();
     await page.keyboard.press("t");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    const surfaceColor = await page
+      .locator("html")
+      .evaluate((root) =>
+        getComputedStyle(root)
+          .getPropertyValue("--surface-1")
+          .trim()
+          .toLowerCase(),
+      );
     await expect
-      .poll(() =>
-        nativeWindow.evaluate((window) => window.getBackgroundColor()),
+      .poll(async () =>
+        (
+          await nativeWindow.evaluate((window) => window.getBackgroundColor())
+        ).toLowerCase(),
       )
-      .toMatch(/eff1f4/i);
+      .toBe(surfaceColor);
     // Linux package CI runs Xvfb without a window manager to handle state changes.
     if (process.platform !== "linux") {
       await nativeWindow.evaluate((window) => window.maximize());
