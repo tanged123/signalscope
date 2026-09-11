@@ -32,8 +32,9 @@ actions, and mobile layouts are not part of this pass.
 
 At the default 13px UI setting, supporting controls use 11px and signal names
 use 12px. Panel titles retain their stronger weight. Legend series use the plot
-font at the selected plot size (9px by default), matching axis ticks; UI and plot font
-preferences remain independent. The plot axis default stays at 9px.
+font at the selected plot size, capped at the UI caption size: 9px by default,
+and at most 11px with the default UI size. UI and plot font preferences remain
+independent; increasing both can still enlarge the legend. Axis sizes are unchanged.
 
 The signal browser uses 26px rows at the default UI size and scales its virtual
 row geometry with font changes. Smaller UI sizes retain 22px compact rows.
@@ -43,7 +44,8 @@ and grow with plot text. Long names truncate with full-path tooltips; encoding
 summaries and inspector controls wrap within narrow legends.
 Statistics use shared column widths and scroll their headers with the values.
 
-Expanded legends keep Select all / Clear selection, Dim all / Undim all, and
+Expanded legends use compact bordered buttons in the UI font for
+Select all / Clear selection, Dim all / Undim all, and
 Hide all / Show all in a visible row above the encoding controls. These act on
 every assigned signal, including rows outside the current filter. Hiding and
 dimming preserve focus; selecting preserves visibility and explicit opacity.

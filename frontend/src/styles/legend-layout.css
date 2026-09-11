@@ -134,7 +134,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-overlay);
   font-family: var(--font-plot);
-  font-size: calc(var(--plot-font-size) * 1px);
+  font-size: var(--legend-font-size);
   font-variant-numeric: tabular-nums;
   line-height: 1.4;
 }

@@ -41,19 +41,24 @@
   display: flex;
   flex: none;
   flex-wrap: wrap;
-  gap: 2px 6px;
-  padding: 3px 6px;
+  gap: 4px;
+  padding: 4px 6px;
   border-bottom: 1px solid var(--border-faint);
 }
 
 .plot-legend-bulk-actions button {
-  padding: 2px 0;
+  min-height: 20px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface-1);
   color: var(--fg-2);
-  font: inherit;
+  font: var(--ui-caption-size) var(--font-ui);
   white-space: nowrap;
 }
 
 .plot-legend-bulk-actions button:hover {
+  background: var(--surface-3);
   color: var(--fg-1);
 }
 
@@ -196,7 +201,7 @@
 
   .plot-series-state::after {
     content: attr(data-symbol);
-    font-size: var(--ui-caption-size);
+    font-size: var(--legend-font-size);
   }
 }
 

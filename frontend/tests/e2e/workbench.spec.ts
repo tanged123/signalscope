@@ -518,6 +518,10 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
   );
   const tips = plotLegend.locator(".plot-legend-tips");
   const tipsHeading = plotLegend.locator(".plot-legend-tips-heading");
+  // Leave room below the height limit before testing upward drag growth.
+  await tipsHeading.focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
   const beforeTipsResize = await tips.boundingBox();
   const tipsHeadingBox = await tipsHeading.boundingBox();
   if (beforeTipsResize === null || tipsHeadingBox === null)

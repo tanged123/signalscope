@@ -87,6 +87,10 @@
   --font-plot: "JetBrains Mono", ui-monospace, "SF Mono", "Menlo", monospace;
   --plot-font-size: 9;
   --ui-caption-size: calc(11rem / 13);
+  --legend-font-size: min(
+    calc(var(--plot-font-size) * 1px),
+    var(--ui-caption-size)
+  );
   --ui-text-size: calc(12rem / 13);
   --ui-body-size: 1rem;
   --ui-heading-size: calc(15rem / 13);

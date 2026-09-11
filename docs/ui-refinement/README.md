@@ -21,8 +21,10 @@ and expose their full names in tooltips. The
 [control inventory and typography details](../../frontend/src/styles/README.md#plot-readability)
 document the changes.
 
-After review, legend signal text now matches the axis tick font size (9px by
-default), with no extra size offset. Expanded floating and docked legends show
+After review, legend signal text follows the plot font size, capped at the small
+UI caption size: 9px by default and at most 11px at the default UI size, even
+when plot text is enlarged. Increasing the UI size still allows larger legends.
+Expanded floating and docked legends use compact bordered buttons in the UI font for
 Select all, Dim all, and Hide all directly above the encoding controls. These
 become Clear selection, Undim all, and Show all when applicable. They affect all
 assigned signals, including filtered rows. Hide and Dim preserve selection;
@@ -60,3 +62,7 @@ of shrinking under flex layout pressure. These resolve the two failures recorded
 in the first draft.
 
 Validation used the browser application, not a packaged Electron build.
+
+The button and font-cap follow-up passed 29 affected unit tests and both focused
+browser checks, including hover, keyboard focus, and enlarged plot text with the
+default interface size. The e2e wrapper also checked TypeScript and built the app.

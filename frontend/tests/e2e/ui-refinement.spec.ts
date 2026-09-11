@@ -284,4 +284,29 @@ test("dense workspace readability and independent signal states", async ({
     .click();
   await expect(row(1)).not.toHaveClass(/focused/);
   await expect(row(1)).toHaveAttribute("data-hidden", "false");
+  await page.keyboard.press("Control+Comma");
+  await page.locator(".palette-input").fill("UI font size");
+  await expect(page.locator(".palette-row.selected")).toContainText(
+    "UI font size",
+  );
+  for (let step = 0; step < 5; step++) {
+    await page.keyboard.press("ArrowLeft");
+    await expect(uiSize).toHaveText(`${String(17 - step)}px`);
+  }
+  await page.keyboard.press("Escape");
+  // Enlarged plot text must not enlarge the legend past the UI caption size.
+  await expect(firstPanel.locator(".plot-series-legend")).toHaveCSS(
+    "font-size",
+    "11px",
+  );
+  const selectAll = actions.getByRole("button", {
+    name: "Select all",
+    exact: true,
+  });
+  await expect(selectAll).toHaveCSS("font-family", /Inter/);
+  await expect(selectAll).toHaveCSS("border-top-style", "solid");
+  await expect(selectAll).toHaveCSS("border-top-width", "1px");
+  await selectAll.hover();
+  await selectAll.focus();
+  await expect(selectAll).toBeFocused();
 });
