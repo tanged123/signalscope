@@ -311,7 +311,7 @@ test("dense workspace readability and independent signal states", async ({
   await expect(selectAll).toBeFocused();
   await firstPanel.locator(".panel-legend-state").click();
   await firstPanel
-    .getByRole("menuitemradio", { name: "Simple", exact: false })
+    .getByRole("menuitemradio", { name: "simple", exact: false })
     .click();
   const simple = firstPanel.locator(".plot-series-legend");
   await expect(simple.locator(".plot-legend-simple-row")).toHaveCount(48);

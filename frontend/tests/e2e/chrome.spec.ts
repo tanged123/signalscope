@@ -151,7 +151,7 @@ test("plot controls and chart metrics are visible inline at desktop sizes", asyn
   }
   await panel.locator(".panel-legend-state").click();
   await panel
-    .getByRole("menuitemradio", { name: "Collapsed", exact: false })
+    .getByRole("menuitemradio", { name: "collapsed", exact: false })
     .click();
   await expect(panel.locator(".plot-series-legend")).toHaveAttribute(
     "data-state",

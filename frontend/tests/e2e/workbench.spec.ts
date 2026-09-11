@@ -1113,7 +1113,7 @@ test("legend console replaces the strip and supports per-plot states", async ({
   await expect(panel.locator(".plot-series-legend")).toBeVisible();
   await page.locator(".panel").first().locator(".panel-legend-state").click();
   await page
-    .getByRole("menuitemradio", { name: "Collapsed", exact: false })
+    .getByRole("menuitemradio", { name: "collapsed", exact: false })
     .click();
   await expect(panel.locator(".plot-series-legend")).toHaveAttribute(
     "data-state",

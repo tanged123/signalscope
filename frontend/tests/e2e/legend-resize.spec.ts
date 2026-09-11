@@ -7,7 +7,7 @@ test("legend rail follows the pointer without reverting between frames", async (
   await gotoApp(page);
   await page.locator(".panel").first().locator(".panel-legend-state").click();
   await page
-    .getByRole("menuitemradio", { name: "Docked", exact: false })
+    .getByRole("menuitemradio", { name: "docked", exact: false })
     .click();
   const panel = page.locator(".panel").first();
   const rail = panel.locator(".plot-series-legend");

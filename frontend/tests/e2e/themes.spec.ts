@@ -88,7 +88,7 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
   const firstPanel = page.locator(".panel").first();
   await firstPanel.locator(".panel-legend-state").click();
   await firstPanel
-    .getByRole("menuitemradio", { name: "Expanded", exact: false })
+    .getByRole("menuitemradio", { name: "expanded", exact: false })
     .click();
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   const plots = page.locator(".plot-wrap");

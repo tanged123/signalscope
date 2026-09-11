@@ -10,10 +10,10 @@ import type {
 } from "../generated/session";
 
 const LEGEND_LABELS: Record<LegendState, string> = {
-  badge: "Collapsed",
-  keys: "Simple",
-  roster: "Expanded",
-  rail: "Docked",
+  badge: "collapsed",
+  keys: "simple",
+  roster: "expanded",
+  rail: "docked",
 };
 
 export interface LineToolbarActions {
@@ -46,7 +46,7 @@ export class LineToolbar {
         <button class="panel-toolbar-control panel-ghost-opacity" type="button" title="Dim non-focused traces; keep them visible">dim others <b class="panel-ghost-value">none</b> <span class="toolbar-caret">▾</span></button>
       </span>
       <span class="panel-toolbar-group" role="group" aria-label="Plot readouts">
-        <button class="panel-toolbar-control panel-legend-state" type="button" title="Legend: collapsed indicator, simple line key, expanded controls, or docked controls">legend <b class="panel-legend-value">Simple</b> <span class="toolbar-caret">▾</span></button>
+        <button class="panel-toolbar-control panel-legend-state" type="button" title="Legend: collapsed indicator, simple line key, expanded controls, or docked controls">legend <b class="panel-legend-value">simple</b> <span class="toolbar-caret">▾</span></button>
         <button class="panel-action panel-stats-toggle" title="Toggle statistics columns (S)" aria-pressed="false">Σ <span>stats</span></button>
         <button class="panel-toolbar-control panel-tips" type="button" title="Data tips: labels, markers, visibility, and actions">tips <b class="panel-tips-value">0</b> <span class="toolbar-caret">▾</span></button>
       </span>`;

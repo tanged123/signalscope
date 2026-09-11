@@ -285,10 +285,10 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
       await panel
         .getByRole("menuitemradio", {
           name: {
-            badge: "Collapsed",
-            keys: "Simple",
-            roster: "Expanded",
-            rail: "Docked",
+            badge: "collapsed",
+            keys: "simple",
+            roster: "expanded",
+            rail: "docked",
           }[mode],
           exact: false,
         })
