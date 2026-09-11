@@ -1,4 +1,29 @@
-import { devices, expect, test as base, type Page } from "@playwright/test";
+import {
+  devices,
+  expect,
+  test as base,
+  type Page,
+  type Locator,
+} from "@playwright/test";
+
+export async function openPanelAxes(panel: Locator): Promise<void> {
+  if (
+    !(await panel
+      .locator(".panel-axes-dropdown")
+      .evaluate((node) => (node as HTMLDetailsElement).open))
+  )
+    await panel.locator(".panel-axes-summary").click();
+}
+
+export async function togglePanelStats(panel: Locator): Promise<void> {
+  await panel.locator(".panel-legend-state").click();
+  await panel
+    .getByRole("menuitemradio", {
+      name: "visible-region statistics",
+      exact: false,
+    })
+    .click();
+}
 
 const testBase = base.extend({
   page: async ({ playwright }, use, testInfo) => {

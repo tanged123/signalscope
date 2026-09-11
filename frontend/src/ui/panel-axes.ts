@@ -8,6 +8,7 @@ import { bindAxisDrop } from "./axis-drop";
 import { showAxisPicker, xAxisLabel } from "./axis-picker";
 import { required } from "./dom";
 import { showAxisLimits, type AxisLimits } from "./axis-limits";
+import { panelControlAnchor } from "./panel-menu";
 
 export interface PanelAxisActions {
   catalog(): Catalog;
@@ -92,7 +93,7 @@ export class PanelAxes {
     this.actions.beforeOpen();
     this.closeMenu = showAxisPicker(
       this.element,
-      required(this.element, `.panel-${axis}-axis`),
+      panelControlAnchor(required(this.element, `.panel-${axis}-axis`)),
       axis,
       axis === "c"
         ? (state.color_axis?.source ?? { kind: "time" })
@@ -121,7 +122,7 @@ export class PanelAxes {
     this.actions.beforeOpen();
     this.closeMenu = showAxisLimits(
       this.element,
-      required(this.element, ".panel-axis-limits"),
+      panelControlAnchor(required(this.element, ".panel-axis-limits")),
       this.state,
       this.actions.visibleRanges(),
       (values) => this.actions.limits(values),

@@ -123,9 +123,9 @@ test("Help opens from the menu, traps focus, and closes by Escape or button", as
   await expect(help).toHaveCount(0);
 });
 
-test("plot controls and chart metrics are visible inline at desktop sizes", async ({
+test("compact plot menus retain settings and a single header row", async ({
   page,
-}) => {
+}, testInfo) => {
   await gotoApp(page);
   const performance = page.getByRole("group", { name: "Chart performance" });
   for (const selector of [
@@ -138,14 +138,10 @@ test("plot controls and chart metrics are visible inline at desktop sizes", asyn
   }
   const panel = page.locator(".panel").first();
   for (const selector of [
-    ".panel-axis-toggle",
-    ".panel-x-axis",
+    ".panel-axes-summary",
     ".panel-line-width",
     ".plot-legend-header",
-    ".panel-ghost-opacity",
     ".panel-legend-state",
-    ".panel-stats-toggle",
-    ".panel-tips",
   ]) {
     await expect(panel.locator(selector)).toBeVisible();
   }
@@ -158,11 +154,41 @@ test("plot controls and chart metrics are visible inline at desktop sizes", asyn
     "badge",
   );
   await expect(panel.locator(".panel-legend-state")).toBeFocused();
+  await panel.locator(".panel-axes-summary").click();
+  for (const control of [
+    ".panel-axis-toggle",
+    ".panel-y-axis",
+    ".panel-x-axis",
+    ".panel-c-axis",
+    ".panel-axis-limits",
+  ])
+    await expect(panel.locator(control)).toBeVisible();
+  await panel.locator(".panel-axis-limits").click();
+  await expect(
+    panel.getByRole("dialog", { name: "Axis limits", exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(panel.locator(".panel-axes-summary")).toBeFocused();
   await panel.locator(".panel-line-width").focus();
   await page.keyboard.press("Enter");
   await expect(panel.locator(".panel-config-popover")).toBeVisible();
+  await expect(
+    panel.getByRole("group", { name: "Line width", exact: true }),
+  ).toBeVisible();
+  await expect(
+    panel.getByRole("group", { name: "Dim others", exact: true }),
+  ).toBeVisible();
+  await panel
+    .getByRole("menuitemradio", { name: "3.0 px", exact: false })
+    .click();
+  await expect(panel.locator(".panel-line-width")).toContainText("3.0");
+  await panel.locator(".panel-legend-state").click();
+  await expect(
+    panel.getByRole("group", { name: "Statistics", exact: true }),
+  ).toBeVisible();
+  await expect(panel.getByRole("group", { name: /^Tips/ })).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(panel.locator(".panel-line-width")).toBeFocused();
+  await expect(panel.locator(".panel-legend-state")).toBeFocused();
   for (const width of [1100, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     const fits = await page
@@ -170,14 +196,33 @@ test("plot controls and chart metrics are visible inline at desktop sizes", asyn
       .evaluate((bar) => bar.scrollWidth <= bar.clientWidth);
     expect(fits).toBe(true);
   }
-  await page.keyboard.press("n");
+  await panel.locator(".panel-split-right").click();
+  await page.setViewportSize({ width: 1100, height: 900 });
   for (const header of await page.locator(".panel-header").all()) {
     expect(
       await header.evaluate(
         (element) => element.scrollWidth <= element.clientWidth,
       ),
     ).toBe(true);
+    const row = await header.evaluate((element) => {
+      const controls = element.querySelector(".panel-toolbar-slot");
+      return {
+        height: element.getBoundingClientRect().height,
+        controlHeight: controls?.getBoundingClientRect().height ?? 0,
+      };
+    });
+    expect(row.height).toBeLessThanOrEqual(row.controlHeight + 2);
   }
+  await page.screenshot({
+    path: testInfo.outputPath("compact-panel-menus.png"),
+  });
+  await panel.locator(".panel-line-width").click();
+  await expect(
+    panel.getByRole("group", { name: "Dim others", exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("compact-style-menu.png"),
+  });
 });
 
 test("UI fonts and sizes apply consistently to controls, muted text, and the signal tree", async ({

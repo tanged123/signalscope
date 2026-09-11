@@ -1,65 +1,46 @@
-# ADR 0065: Three panel toolbar groups
+# ADR 0065: Compact panel configuration menus
 
-- Status: Withdrawn after UI review
+- Status: Accepted after revised UI review
 - Date: 2026-09-11
-- Amends: [ADR 0058](0058-session-title-and-contextual-chrome.md), replacing
-  individually inline plot controls with three explicit dropdown groups.
+- Amends: [ADR 0058](0058-session-title-and-contextual-chrome.md)
 
 ## Context
 
-Follow-up review rejected the dropdown groups because they obscured information
-and frequent actions. The header again uses individually visible controls with
-subtle group seams, as in ADR 0058. The shared dropdown component was removed;
-`LineToolbar` retains ownership of the existing inline controls and pickers.
-The original decision below is retained as history and is not a requirement.
-
-Spacing alone did not make the panel header's control groups clear. The accepted
-UI review requests Data & axes, Appearance, and Analysis dropdowns, with current
-configuration summaries visible when closed. This structure must separate shared
-interaction from the controls supplied by a plot family.
+Individually inline controls wrapped the panel header. The first dropdown pass
+also consumed too much width and added another menu step for common settings.
+The revised review requests compact menus that preserve visible configuration.
 
 ## Decision
 
-`ui/panel-toolbar.ts` owns the three named group triggers, one open group at a
-time, positioning, keyboard navigation, outside dismissal, and focus restoration.
-`PanelToolbarGroups` requires a controls element and initial summary for each
-group. Families publish summary changes through `setSummary`; controls keep their
-existing callbacks and state owners. The interface contains no Line2D options.
+The header has three short controls: axes, style, and legend. Their values show
+axis presentation, line width and active dimming, legend mode, enabled statistics,
+and tip count. Full summaries are available in tooltips. Title, binding chips,
+and panel layout actions remain directly accessible. The header does not wrap;
+narrow control and binding strips scroll horizontally, including keyboard focus.
 
-`ui/line-toolbar.ts` supplies the current Line2D controls and their summaries.
-Data & axes contains assignments, axis presentation, and limits; Appearance
-contains line width, dimming, and legend presentation; Analysis contains statistics
-and tip controls. `PanelAxes` continues to own the axis pickers and limits editor.
-The panel title, binding summary, and split/maximize/close actions remain outside
-the dropdowns. Dragging signals over Data & axes opens its controls for axis drops.
+Axes contains signal assignment, X/color bindings, axis presentation, and limits.
+Its existing signal pickers and limits editor replace the dropdown and return
+focus to the axes summary. Dragging a signal over axes opens its drop targets.
 
-A setting picker replaces the group popup and uses its visible trigger as its
-anchor. Existing picker components own their own navigation and dismissal; Escape
-returns to the group trigger. This avoids nested popovers competing for panel
-space. The shared toolbar reuses `positionPanelPopover`, and removes its document
-listeners and ResizeObserver on disposal. Family disposal also closes its pickers.
+Style directly lists width and dimming choices in labeled sections. Legend
+directly lists the four modes, the statistics toggle, and tip display/clear
+actions. These use the existing menu keyboard navigation and dismissal.
 
-Open-group state is transient. No session, protocol, or preference fields change;
-the same controls and summaries run in live workspaces and offline snapshots.
-The interface establishes a presentation boundary, not a registry or support for
-additional plot types. New families still require ADR 0052's deliberate design.
+## Ownership and compatibility
 
-## Alternatives and tradeoffs
+`LineToolbar` owns the three controls, transient axes dropdown state, summaries,
+and menu cleanup. `PanelAxes` retains assignment, limits, and axis drop behavior.
+`showPanelMenu` owns setting-menu navigation and document-listener cleanup;
+optional section labels group its existing choices. Native details supplies
+the axes disclosure. Disposal removes toolbar listeners and closes menus.
 
-Keeping every control inline avoids a click, but leaves grouping ambiguous and
-consumes header space. Three dropdowns add a step to configuration; visible
-summaries, tooltips for truncated text, and existing shortcuts retain context.
-One generic settings menu would lose the requested stable three-part structure.
+No generic toolbar registry or new panel types are introduced. Session,
+preferences, protocol, and renderer behavior are unchanged. The simple legend
+remains a line key; expanded and docked legends retain the full editing controls.
+Internal legend state values remain compatible with existing sessions.
 
 ## Validation
 
-`panel-toolbar.test.ts` checks family-supplied controls, focus navigation,
-exclusive groups, picker handoff, dismissal, and teardown. Browser checks cover
-closed summaries, all control paths at narrow widths, changing configuration,
-axis and color bindings, statistics, legend modes, and offline round trips.
-
-## Consequences and implementation status
-
-The Line2D toolbar implementation and the shared component accompany this record.
-PanelView retains composition and delegates the extracted toolbar behavior.
-Revisit group applicability when a second concrete plot family is designed.
+The focused browser check exercises each menu, direct style choices, picker
+focus restoration, and single-row headers in narrow panels. It captures the
+closed header and open style menu in the running browser application.

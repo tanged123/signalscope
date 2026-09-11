@@ -1,9 +1,15 @@
 # Plot UI refinement review
 
-Latest review restores the inline toolbar. The Simple legend contains line
+The latest toolbar uses compact axes, style, and legend menus with current
+values in the buttons. Width, dimming, legend modes, statistics, and tips are
+direct choices within each menu. [Compact header](compact-panel-menus.png) and
+[open style menu](compact-style-menu.png) show the latest narrow-panel layout.
+The earlier dense-workspace captures below document the inline toolbar revision.
+
+The simple legend contains line
 samples and names; search, bulk actions, encoding controls, and detailed readouts
-remain in Expanded and Docked legends. The mode picker now reads Collapsed,
-Simple, Expanded, and Docked. [Simple legend capture](after-simple.png).
+remain in expanded and docked legends. The mode picker reads collapsed,
+simple, expanded, and docked. [Simple legend capture](after-simple.png).
 
 These captures show the same 48-signal workspace (86,400 samples) in the running
 application, using visible Chromium at device scale 1. The left legend floats;
@@ -54,9 +60,8 @@ To repeat the baseline capture, serve the base revision on port 4174 and set
 
 ## Validation status
 
-Both focused checks passed: inline toolbar access and the dense-workspace
-legend check, including Simple/Expanded switching and keyboard selection.
-The e2e wrapper also passed frontend typechecking and builds.
-Earlier broader results belong to previous revisions; no broad suite
-was rerun for this follow-up. Validation uses visible Chromium, not packaged
-Electron.
+The compact-menu follow-up passed one focused browser check for menu access,
+direct style choices, picker focus restoration, and single-row headers with
+side-by-side panels at 1100px. The e2e wrapper also typechecks and builds the
+frontend. Earlier dense-legend checks belong to the previous revision; no broad
+suite was rerun. Validation uses visible Chromium, not packaged Electron.

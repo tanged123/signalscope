@@ -4,7 +4,17 @@ export interface MenuOption {
   label: string;
   active: boolean;
   action?: boolean;
+  section?: string;
   run(): void;
+}
+
+/** Axis pickers replace the dropdown and return to its visible summary. */
+export function panelControlAnchor(control: HTMLElement): HTMLElement {
+  const dropdown = control.closest<HTMLDetailsElement>(".panel-axes-dropdown");
+  const summary = dropdown?.querySelector<HTMLElement>("summary");
+  if (dropdown === null || summary == null) return control;
+  dropdown.open = false;
+  return summary;
 }
 
 export function positionPanelPopover(
@@ -68,7 +78,20 @@ export function showPanelMenu(
     const matches = options.filter((option) =>
       option.label.toLowerCase().includes(query),
     );
+    let section: string | undefined;
+    let group = list;
     buttons = (searchable ? matches.slice(0, 100) : matches).map((option) => {
+      if (option.section !== undefined && option.section !== section) {
+        section = option.section;
+        group = document.createElement("div");
+        group.setAttribute("role", "group");
+        group.setAttribute("aria-label", section);
+        const heading = document.createElement("div");
+        heading.className = "panel-config-title";
+        heading.textContent = section;
+        group.append(heading);
+        list.append(group);
+      }
       const button = document.createElement("button");
       button.type = "button";
       button.tabIndex = -1;
@@ -83,7 +106,7 @@ export function showPanelMenu(
         close(true);
         option.run();
       });
-      list.append(button);
+      group.append(button);
       return button;
     });
     if (searchable) {

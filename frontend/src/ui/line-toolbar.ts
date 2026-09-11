@@ -1,8 +1,12 @@
 import { axisControlsMarkup } from "./panel-axes";
 import { required } from "./dom";
 import { formatToolbarNumber } from "./series-inspector";
-import { showPanelMenu, type MenuOption } from "./panel-menu";
-import { DEFAULT_PANEL_LINE_WIDTH } from "../app/style-defaults";
+import {
+  showPanelMenu,
+  positionPanelPopover,
+  type MenuOption,
+} from "./panel-menu";
+import { SIGNAL_DRAG_TYPE, SET_DRAG_TYPE, hasDragType } from "./panel-shell";
 import type {
   AnnotationDisplay,
   LegendState,
@@ -32,24 +36,89 @@ export class LineToolbar {
   private readonly abort = new AbortController();
   private state: PanelState | null = null;
   private menuCleanup: (() => void) | null = null;
+  private readonly axes: HTMLDetailsElement;
 
   constructor(
     private readonly host: HTMLElement,
     slot: HTMLElement,
     private readonly actions: LineToolbarActions,
   ) {
-    slot.innerHTML = `<span class="panel-toolbar-group panel-toolbar-axes" role="group" aria-label="Plot axes">
+    slot.innerHTML = `<details class="panel-axes-dropdown">
+      <summary class="panel-toolbar-control panel-axes-summary" aria-label="Axes and signals">axes: <b class="panel-axes-value"></b> <span class="toolbar-caret">▾</span></summary>
+      <div class="panel-axis-menu" role="group" aria-label="Axes and signals">
         <button class="panel-action panel-axis-toggle" title="Switch axis presentation">axes: gutter</button>
-        ${axisControlsMarkup()}</span>
-      <span class="panel-toolbar-group" role="group" aria-label="Plot appearance">
-        <button class="panel-toolbar-control panel-line-width" type="button" title="Default line width for this panel" aria-label="Line width"><span class="line-width-sample" aria-hidden="true"></span>width <span class="panel-line-width-value">${DEFAULT_PANEL_LINE_WIDTH.toFixed(1)}</span> <span class="toolbar-caret">▾</span></button>
-        <button class="panel-toolbar-control panel-ghost-opacity" type="button" title="Dim non-focused traces; keep them visible">dim others <b class="panel-ghost-value">none</b> <span class="toolbar-caret">▾</span></button>
-      </span>
-      <span class="panel-toolbar-group" role="group" aria-label="Plot readouts">
-        <button class="panel-toolbar-control panel-legend-state" type="button" title="Legend: collapsed indicator, simple line key, expanded controls, or docked controls">legend <b class="panel-legend-value">simple</b> <span class="toolbar-caret">▾</span></button>
-        <button class="panel-action panel-stats-toggle" title="Toggle statistics columns (S)" aria-pressed="false">Σ <span>stats</span></button>
-        <button class="panel-toolbar-control panel-tips" type="button" title="Data tips: labels, markers, visibility, and actions">tips <b class="panel-tips-value">0</b> <span class="toolbar-caret">▾</span></button>
-      </span>`;
+        ${axisControlsMarkup()}</div></details>
+      <button class="panel-toolbar-control panel-line-width" type="button" aria-label="Style">style: <b class="panel-line-width-value"></b><span class="panel-ghost-value"></span> <span class="toolbar-caret">▾</span></button>
+      <button class="panel-toolbar-control panel-legend-state" type="button" aria-label="Legend and readouts">legend: <b class="panel-legend-value"></b><span class="panel-readout-value"></span> <span class="toolbar-caret">▾</span></button>`;
+    this.axes = required<HTMLDetailsElement>(slot, "details");
+    const summary = required<HTMLElement>(this.axes, "summary");
+    const options = { signal: this.abort.signal };
+    slot.addEventListener(
+      "dragstart",
+      (event) => event.preventDefault(),
+      options,
+    );
+    const openAxes = (): void => {
+      this.closeMenu();
+      actions.beforeOpen();
+      summary.removeAttribute("aria-expanded");
+      this.axes.open = true;
+      this.positionAxes();
+    };
+    summary.addEventListener(
+      "click",
+      (event) => {
+        event.preventDefault();
+        if (this.axes.open) this.axes.open = false;
+        else {
+          openAxes();
+          required<HTMLElement>(this.axes, "button").focus();
+        }
+      },
+      options,
+    );
+    summary.addEventListener(
+      "dragenter",
+      (event) => {
+        if (
+          hasDragType(event, SIGNAL_DRAG_TYPE) ||
+          hasDragType(event, SET_DRAG_TYPE)
+        )
+          openAxes();
+      },
+      options,
+    );
+    this.axes.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key === "Escape" && this.axes.open) {
+          event.preventDefault();
+          event.stopPropagation();
+          this.axes.open = false;
+          summary.focus();
+        }
+      },
+      options,
+    );
+    this.axes.addEventListener(
+      "focusout",
+      (event) => {
+        if (
+          event.relatedTarget instanceof Node &&
+          !this.axes.contains(event.relatedTarget)
+        )
+          this.axes.open = false;
+      },
+      options,
+    );
+    document.addEventListener(
+      "pointerdown",
+      (event) => {
+        if (event.target instanceof Node && !this.axes.contains(event.target))
+          this.axes.open = false;
+      },
+      { ...options, capture: true },
+    );
     const bind = (
       selector: string,
       run: (anchor: HTMLElement) => void,
@@ -63,12 +132,9 @@ export class LineToolbar {
         { signal: this.abort.signal },
       );
     };
-    bind(".panel-stats-toggle", () => actions.toggleStats());
     bind(".panel-axis-toggle", () => actions.toggleAxes());
     bind(".panel-line-width", (anchor) => this.openWidth(anchor));
-    bind(".panel-ghost-opacity", (anchor) => this.openGhost(anchor));
     bind(".panel-legend-state", (anchor) => this.openLegend(anchor));
-    bind(".panel-tips", (anchor) => this.openTips(anchor));
   }
 
   update(state: PanelState): void {
@@ -76,25 +142,43 @@ export class LineToolbar {
     const axis = required<HTMLElement>(this.host, ".panel-axis-toggle");
     axis.textContent = `axes: ${state.axis_style}`;
     axis.title = `Switch to ${state.axis_style === "gutter" ? "inline" : "gutter"} axes`;
+    required(this.host, ".panel-axes-value").textContent = state.axis_style;
+    required<HTMLElement>(this.host, ".panel-axes-summary").title = [
+      `Axes: ${state.axis_style}`,
+      required<HTMLElement>(this.host, ".panel-x-axis").title,
+      required<HTMLElement>(this.host, ".panel-c-axis").title,
+      "Signal assignment, limits, scales, direction, and equal units",
+    ].join(" · ");
     const width = formatToolbarNumber(state.line_width);
     const dim =
       state.ghost_mode === "all"
         ? "none"
         : `${String(Math.round(state.ghost_opacity * 100))}%`;
     required(this.host, ".panel-line-width-value").textContent = width;
-    required(this.host, ".panel-ghost-value").textContent = dim;
+    required(this.host, ".panel-ghost-value").textContent =
+      dim === "none" ? "" : ` · ${dim}`;
+    required<HTMLElement>(this.host, ".panel-line-width").title =
+      `Line width: ${width}px · dim others: ${dim}`;
     required(this.host, ".panel-legend-value").textContent =
       LEGEND_LABELS[state.legend_state];
-    required(this.host, ".panel-tips-value").textContent = String(
-      state.annotations.length,
-    );
-    required(this.host, ".panel-stats-toggle").setAttribute(
-      "aria-pressed",
-      String(state.show_stats),
-    );
+    required(this.host, ".panel-readout-value").textContent =
+      `${state.show_stats ? " · Σ" : ""}${state.annotations.length > 0 ? ` · ${String(state.annotations.length)}` : ""}`;
+    required<HTMLElement>(this.host, ".panel-legend-state").title =
+      `Legend: ${LEGEND_LABELS[state.legend_state]} · statistics ${state.show_stats ? "on" : "off"} · ${String(state.annotations.length)} tips (${state.annotation_display})`;
+    this.positionAxes();
+  }
+
+  private positionAxes(): void {
+    if (this.axes.open)
+      positionPanelPopover(
+        this.host,
+        required(this.axes, "summary"),
+        required(this.axes, ".panel-axis-menu"),
+      );
   }
 
   closeMenu(): void {
+    this.axes.open = false;
     this.menuCleanup?.();
     this.menuCleanup = null;
   }
@@ -117,22 +201,21 @@ export class LineToolbar {
   private openWidth(anchor: HTMLElement): void {
     const state = this.state;
     if (state === null) return;
-    this.open(
-      anchor,
-      "LINE WIDTH · PANEL DEFAULT",
-      [1, 1.4, 1.5, 2, 3].map((width) => ({
+    this.open(anchor, "STYLE", [
+      ...[1, 1.4, 1.5, 2, 3].map((width) => ({
+        section: "Line width",
         label: `${formatToolbarNumber(width)} px`,
         active: Math.abs(state.line_width - width) < 0.001,
         run: () => this.actions.setWidth(width),
       })),
-    );
+      ...this.ghostOptions(state),
+    ]);
   }
 
-  private openGhost(anchor: HTMLElement): void {
-    const state = this.state;
-    if (state === null) return;
-    this.open(anchor, "DIM OTHER SERIES", [
+  private ghostOptions(state: PanelState): MenuOption[] {
+    return [
       {
+        section: "Dim others",
         label: "none · show full color",
         active: state.ghost_mode === "all",
         run: () => {
@@ -140,6 +223,7 @@ export class LineToolbar {
         },
       },
       ...[0.2, 0.35, 0.5].map((opacity) => ({
+        section: "Dim others",
         label: `to ${String(Math.round(opacity * 100))}% opacity`,
         active:
           state.ghost_mode === "ghost" &&
@@ -149,38 +233,44 @@ export class LineToolbar {
           if (state.ghost_mode !== "ghost") this.actions.toggleGhost();
         },
       })),
-    ]);
+    ];
   }
 
   private openLegend(anchor: HTMLElement): void {
     const state = this.state;
     if (state === null) return;
-    this.open(
-      anchor,
-      "LEGEND TYPE",
-      (["badge", "keys", "roster", "rail"] as const).map((legend) => ({
+    this.open(anchor, "LEGEND & READOUTS", [
+      ...(["badge", "keys", "roster", "rail"] as const).map((legend) => ({
+        section: "Legend",
         label: LEGEND_LABELS[legend],
         active: state.legend_state === legend,
         run: () => this.actions.setLegend(legend),
       })),
-    );
+      {
+        section: "Statistics",
+        label: "visible-region statistics",
+        active: state.show_stats,
+        run: () => this.actions.toggleStats(),
+      },
+      ...this.tipOptions(state),
+    ]);
   }
 
-  private openTips(anchor: HTMLElement): void {
-    const state = this.state;
-    if (state === null) return;
-    this.open(anchor, `TIPS · ${String(state.annotations.length)}`, [
+  private tipOptions(state: PanelState): MenuOption[] {
+    return [
       ...(["labels", "markers", "hidden"] as const).map((mode) => ({
+        section: `Tips · ${String(state.annotations.length)}`,
         label: mode === "markers" ? "markers only" : mode,
         active: state.annotation_display === mode,
         run: () => this.actions.setTips(mode),
       })),
       {
+        section: `Tips · ${String(state.annotations.length)}`,
         label: "clear all",
         active: false,
         action: true,
         run: () => this.actions.clearTips(),
       },
-    ]);
+    ];
   }
 }

@@ -39,7 +39,7 @@
   display: flex;
   height: auto;
   flex: none;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   min-height: 26px;
   align-items: center;
   gap: 0;
@@ -69,11 +69,51 @@
 }
 
 .panel-toolbar-binding {
-  flex: 0 1 auto;
+  flex: 0 100 auto;
+  min-width: 104px;
+  max-width: 240px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  padding-inline: 5px;
 }
 
 .panel-toolbar-slot {
-  display: contents;
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.panel-toolbar-slot > * {
+  flex: none;
+  padding-inline: 3px;
+  border-left: 1px solid var(--border);
+}
+
+.panel-axes-summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.panel-axes-summary::-webkit-details-marker {
+  display: none;
+}
+
+.panel-axes-summary:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+
+:is(.panel-config-popover, .panel-axis-menu) {
+  max-height: var(--panel-popover-space, 420px);
+  overflow-y: auto;
+}
+
+:is(.panel-config-popover, .panel-axis-menu) [role="group"] + [role="group"] {
+  border-top: 1px solid var(--border-faint);
+  margin-top: 4px;
+  padding-top: 4px;
 }
 
 .panel-toolbar-control {
@@ -180,10 +220,13 @@
 
 .panel-bindings {
   display: inline-flex;
+  flex: 1 1 0;
   min-width: 0;
   align-items: center;
   gap: 2px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .binding-chip {
@@ -212,7 +255,7 @@
 }
 
 .binding-popover,
-.panel-config-popover {
+:is(.panel-config-popover, .panel-axis-menu) {
   position: absolute;
   z-index: 4;
   overflow: hidden;
@@ -280,7 +323,8 @@
   color: var(--fg-1);
 }
 
-.panel-config-popover {
+:is(.panel-config-popover, .panel-axis-menu) {
+  overflow-y: auto;
   width: min(190px, calc(100% - 8px));
   padding: 5px;
   font: var(--ui-caption-size) var(--font-ui);
@@ -293,7 +337,7 @@
   letter-spacing: 0.08em;
 }
 
-.panel-config-popover button {
+:is(.panel-config-popover, .panel-axis-menu) button {
   display: block;
   width: 100%;
   padding: 4px;
@@ -302,8 +346,8 @@
   text-align: left;
 }
 
-.panel-config-popover button:hover,
-.panel-config-popover button:focus-visible {
+:is(.panel-config-popover, .panel-axis-menu) button:hover,
+:is(.panel-config-popover, .panel-axis-menu) button:focus-visible {
   background: var(--surface-3);
   color: var(--fg-1);
 }

@@ -448,7 +448,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
     .toEqual({ plotFamilyApplied: true, plotSizeApplied: true });
   for (const selector of [
     ".panel-line-width",
-    ".panel-tips",
+    ".panel-legend-state",
     ".panel-legend-state",
   ]) {
     await panel.locator(selector).click();
@@ -481,7 +481,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
     await expect(menu).toHaveCount(0);
   }
 
-  await panel.locator(".panel-tips").click();
+  await panel.locator(".panel-legend-state").click();
   await panel.getByRole("menuitem", { name: "clear all" }).click();
   await expect(page.locator("#legend-probe")).toHaveAttribute(
     "data-tips-cleared",

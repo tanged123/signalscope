@@ -63,9 +63,12 @@ the transitions using existing focus and override fields. `ui/legend-bulk-action
 owns the buttons, and their keyboard focus survives refreshes. Session/snapshot
 schemas and the renderer resolution rules are unchanged.
 
-The panel header keeps every control inline. Groups wrap as panels narrow,
-with seams between assignments, axes, appearance, and readouts. Nothing moved
-into a new popover. The control inventory and retained behavior are:
+The panel header uses short axes, style, and legend summaries. Axes contains
+assignment, X/color bindings, presentation, and limits. Style directly lists
+width and dimming choices; legend directly lists modes, statistics, and tips.
+Current values remain in the closed buttons, with full tooltips. The header
+stays on one line; control and binding strips scroll at narrow widths. Existing
+pickers return focus to their visible trigger. See ADR 0065. The inventory is:
 
 | Control                           | Behavior                                                                |
 | --------------------------------- | ----------------------------------------------------------------------- |

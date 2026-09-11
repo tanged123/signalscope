@@ -1,4 +1,5 @@
 import { expect, gotoApp, test } from "./fixtures";
+import { openPanelAxes, togglePanelStats } from "./fixtures";
 import { THEME_ORDER } from "../../src/app/themes";
 
 test("panel focus stays quiet and legends stay opaque during navigation", async ({
@@ -24,6 +25,7 @@ test("panel focus stays quiet and legends stay opaque during navigation", async 
   await expect(legend).toHaveCSS("opacity", "1");
   await page.mouse.up({ button: "right" });
   await expect(page.locator(".gesture-hint")).toHaveText("");
+  await openPanelAxes(panel);
   const control = panel.locator(".panel-axis-limits");
   await page.keyboard.press("Tab");
   await control.focus();
@@ -84,7 +86,7 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
   await row.dispatchEvent("dragend", { dataTransfer });
   await dataTransfer.dispose();
   await expect(secondPanel.locator(".binding-chip")).toHaveCount(1);
-  await secondPanel.locator(".panel-stats-toggle").click();
+  await togglePanelStats(secondPanel);
   const firstPanel = page.locator(".panel").first();
   await firstPanel.locator(".panel-legend-state").click();
   await firstPanel
@@ -151,7 +153,7 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
       }
       for (const panel of await page.locator(".panel").all()) {
         for (const control of [
-          ".panel-x-axis",
+          ".panel-axes-summary",
           ".panel-line-width",
           ".panel-legend-state",
           ".panel-split-right",

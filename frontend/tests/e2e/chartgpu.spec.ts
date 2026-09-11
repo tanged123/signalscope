@@ -1,4 +1,5 @@
 import { expect, gotoApp, test } from "./fixtures";
+import { togglePanelStats } from "./fixtures";
 
 test("recovers when the GPU is lost before the application subscribes", async ({
   page,
@@ -74,7 +75,7 @@ test("line style changes submit valid WebGPU command buffers", async ({
 
   const panel = page.locator(".panel").first();
 
-  await panel.locator(".panel-stats-toggle").click();
+  await togglePanelStats(panel);
   await panel
     .locator(".plot-stat-row .plot-row-inspector-toggle")
     .first()

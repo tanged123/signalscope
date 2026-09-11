@@ -279,14 +279,14 @@ describe("PanelView chrome", () => {
       [...(legend?.querySelectorAll(".plot-legend-encoding-chip") ?? [])].map(
         (chip) => chip.textContent,
       ),
-    ).toEqual(["color ← source", "dash ← flat", "width ← flat · 1.4"]);
+    ).toEqual([]);
     expect(view.element.querySelector(".panel-config-toggle")).toBeNull();
     expect(view.element.querySelector(".panel-line-width")?.textContent).toBe(
-      "width 1.4 ▾",
+      "style: 1.4 ▾",
     );
     expect(
-      view.element.querySelector(".panel-ghost-opacity")?.textContent,
-    ).toBe("dim others none ▾");
+      view.element.querySelector(".panel-line-width")?.getAttribute("title"),
+    ).toBe("Line width: 1.4px · dim others: none");
     expect(view.element.querySelector(".panel-focus-chip")).toBeNull();
     expect(view.element.querySelector(".panel-annotations")).toBeNull();
   });
@@ -645,7 +645,9 @@ describe("PanelView chrome", () => {
     ];
     view.update(panel, false);
 
-    view.element.querySelector<HTMLButtonElement>(".panel-tips")?.click();
+    view.element
+      .querySelector<HTMLButtonElement>(".panel-legend-state")
+      ?.click();
     const clear = [
       ...view.element.querySelectorAll<HTMLButtonElement>(
         ".panel-config-popover button",

@@ -1,4 +1,5 @@
 import { expect, gotoApp, test } from "./fixtures";
+import { togglePanelStats } from "./fixtures";
 import { WorkspaceModel } from "../../src/app/workspace";
 import { seal } from "../../src/app/envelope";
 import { mkdirSync } from "node:fs";
@@ -181,16 +182,9 @@ test("dense workspace readability and independent signal states", async ({
         .evaluate((element) => element.scrollWidth <= element.clientWidth),
     ).toBe(true);
     for (const control of [
-      ".panel-axis-toggle",
-      ".panel-y-axis",
-      ".panel-x-axis",
-      ".panel-c-axis",
-      ".panel-axis-limits",
+      ".panel-axes-summary",
       ".panel-line-width",
-      ".panel-ghost-opacity",
       ".panel-legend-state",
-      ".panel-stats-toggle",
-      ".panel-tips",
       ".panel-split-right",
       ".panel-split-down",
       ".panel-maximize",
@@ -228,7 +222,7 @@ test("dense workspace readability and independent signal states", async ({
     if (previous !== undefined)
       expect(bound.top).toBeGreaterThanOrEqual(previous.bottom);
   }
-  await firstPanel.locator(".panel-stats-toggle").click();
+  await togglePanelStats(firstPanel);
   const hiddenStat = firstPanel
     .locator(".plot-stat-row")
     .filter({ hasText: "temperature_sensor_02" });
@@ -252,7 +246,7 @@ test("dense workspace readability and independent signal states", async ({
       return Math.abs((heading?.x ?? 0) - (value?.x ?? 1000));
     })
     .toBeLessThan(1);
-  await firstPanel.locator(".panel-stats-toggle").click();
+  await togglePanelStats(firstPanel);
   const actions = firstPanel.getByRole("group", {
     name: "All plot signals",
     exact: true,
