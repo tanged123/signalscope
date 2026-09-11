@@ -1,6 +1,6 @@
 # Plot UI refinement review
 
-The latest toolbar uses compact axes, style, and legend menus with current
+The latest toolbar uses compact plot, style, and readouts menus with current
 values in the buttons. Width, dimming, legend modes, statistics, and tips are
 direct choices within each menu. [Compact header](compact-panel-menus.png) and
 [open style menu](compact-style-menu.png) show the latest narrow-panel layout.

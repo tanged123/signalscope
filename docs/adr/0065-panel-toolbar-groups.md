@@ -12,17 +12,17 @@ The revised review requests compact menus that preserve visible configuration.
 
 ## Decision
 
-The header has three short controls: axes, style, and legend. Their values show
+The header has three short controls: plot, style, and readouts. Their values show
 axis presentation, line width and active dimming, legend mode, enabled statistics,
 and tip count. Full summaries are available in tooltips. Title, binding chips,
 and panel layout actions remain directly accessible. The header does not wrap;
 narrow control and binding strips scroll horizontally, including keyboard focus.
 
-Axes contains signal assignment, X/color bindings, axis presentation, and limits.
+Plot contains signal assignment, X/color bindings, axis presentation, and limits.
 Its existing signal pickers and limits editor replace the dropdown and return
 focus to the axes summary. Dragging a signal over axes opens its drop targets.
 
-Style directly lists width and dimming choices in labeled sections. Legend
+Style directly lists width and dimming choices in labeled sections. Readouts
 directly lists the four modes, the statistics toggle, and tip display/clear
 actions. These use the existing menu keyboard navigation and dismissal.
 

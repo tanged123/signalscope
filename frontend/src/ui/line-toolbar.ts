@@ -44,12 +44,12 @@ export class LineToolbar {
     private readonly actions: LineToolbarActions,
   ) {
     slot.innerHTML = `<details class="panel-axes-dropdown">
-      <summary class="panel-toolbar-control panel-axes-summary" aria-label="Axes and signals">axes: <b class="panel-axes-value"></b> <span class="toolbar-caret">▾</span></summary>
-      <div class="panel-axis-menu" role="group" aria-label="Axes and signals">
+      <summary class="panel-toolbar-control panel-axes-summary" aria-label="Plot settings">plot: <b class="panel-axes-value"></b> <span class="toolbar-caret">▾</span></summary>
+      <div class="panel-axis-menu" role="group" aria-label="Plot settings">
         <button class="panel-action panel-axis-toggle" title="Switch axis presentation">axes: gutter</button>
         ${axisControlsMarkup()}</div></details>
       <button class="panel-toolbar-control panel-line-width" type="button" aria-label="Style">style: <b class="panel-line-width-value"></b><span class="panel-ghost-value"></span> <span class="toolbar-caret">▾</span></button>
-      <button class="panel-toolbar-control panel-legend-state" type="button" aria-label="Legend and readouts">legend: <b class="panel-legend-value"></b><span class="panel-readout-value"></span> <span class="toolbar-caret">▾</span></button>`;
+      <button class="panel-toolbar-control panel-legend-state" type="button" aria-label="Readouts">readouts: <b class="panel-legend-value"></b><span class="panel-readout-value"></span> <span class="toolbar-caret">▾</span></button>`;
     this.axes = required<HTMLDetailsElement>(slot, "details");
     const summary = required<HTMLElement>(this.axes, "summary");
     const options = { signal: this.abort.signal };
@@ -239,7 +239,7 @@ export class LineToolbar {
   private openLegend(anchor: HTMLElement): void {
     const state = this.state;
     if (state === null) return;
-    this.open(anchor, "LEGEND & READOUTS", [
+    this.open(anchor, "READOUTS", [
       ...(["badge", "keys", "roster", "rail"] as const).map((legend) => ({
         section: "Legend",
         label: LEGEND_LABELS[legend],

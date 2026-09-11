@@ -63,9 +63,9 @@ the transitions using existing focus and override fields. `ui/legend-bulk-action
 owns the buttons, and their keyboard focus survives refreshes. Session/snapshot
 schemas and the renderer resolution rules are unchanged.
 
-The panel header uses short axes, style, and legend summaries. Axes contains
+The panel header uses short plot, style, and readouts summaries. Plot contains
 assignment, X/color bindings, presentation, and limits. Style directly lists
-width and dimming choices; legend directly lists modes, statistics, and tips.
+width and dimming choices; readouts directly lists modes, statistics, and tips.
 Current values remain in the closed buttons, with full tooltips. The header
 stays on one line; control and binding strips scroll at narrow widths. Existing
 pickers return focus to their visible trigger. See ADR 0065. The inventory is:
