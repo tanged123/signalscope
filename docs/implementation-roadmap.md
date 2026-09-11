@@ -12,10 +12,9 @@ are recorded in [ADRs](adr/README.md).
 
 ## Current product
 
-- Chrome keeps dataset totals and chart metrics in the status bar. Each plot
-  header exposes Data & axes, Appearance, and Analysis dropdowns with visible
-  summaries ([ADR 0065](adr/0065-panel-toolbar-groups.md)). Both rows wrap when
-  needed, keeping header controls clear of the plot canvas.
+- Chrome keeps dataset totals and chart metrics in the status bar, with
+  appearance and readout controls inline in each plot header. Both rows wrap
+  when needed, keeping header controls clear of the plot canvas.
   Click the title to rename a session; Enter or blur saves,
   Escape cancels. Display titles persist separately from file paths. Help opens
   keyboard and gesture guidance with Escape, outside-click, and close-button

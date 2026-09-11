@@ -1,4 +1,4 @@
-import { expect, gotoApp, test, openPanelGroup } from "./fixtures";
+import { expect, gotoApp, test } from "./fixtures";
 import manifest from "../../package.json" with { type: "json" };
 
 test("About opens useful release information from the menu and command palette", async ({
@@ -123,7 +123,7 @@ test("Help opens from the menu, traps focus, and closes by Escape or button", as
   await expect(help).toHaveCount(0);
 });
 
-test("plot groups show summaries and expose controls at desktop sizes", async ({
+test("plot controls and chart metrics are visible inline at desktop sizes", async ({
   page,
 }) => {
   await gotoApp(page);
@@ -138,43 +138,31 @@ test("plot groups show summaries and expose controls at desktop sizes", async ({
   }
   const panel = page.locator(".panel").first();
   for (const selector of [
-    '[data-toolbar-trigger="data"]',
-    '[data-toolbar-trigger="appearance"]',
-    '[data-toolbar-trigger="analysis"]',
+    ".panel-axis-toggle",
+    ".panel-x-axis",
+    ".panel-line-width",
     ".plot-legend-header",
-    ".plot-legend-encoding",
-    ".plot-legend-footer",
+    ".panel-ghost-opacity",
+    ".panel-legend-state",
+    ".panel-stats-toggle",
+    ".panel-tips",
   ]) {
     await expect(panel.locator(selector)).toBeVisible();
   }
-  await openPanelGroup(panel, "appearance");
   await panel.locator(".panel-legend-state").click();
   await panel
-    .getByRole("menuitemradio", { name: "badge", exact: false })
+    .getByRole("menuitemradio", { name: "Collapsed", exact: false })
     .click();
   await expect(panel.locator(".plot-series-legend")).toHaveAttribute(
     "data-state",
     "badge",
   );
-  await expect(
-    panel.locator('[data-toolbar-trigger="appearance"]'),
-  ).toBeFocused();
-  await openPanelGroup(panel, "appearance");
-  await panel.locator(".panel-line-width").focus();
-  await page.keyboard.press("End");
   await expect(panel.locator(".panel-legend-state")).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(
-    panel.locator('[data-toolbar-trigger="analysis"]'),
-  ).toBeFocused();
-  await openPanelGroup(panel, "appearance");
   await panel.locator(".panel-line-width").focus();
   await page.keyboard.press("Enter");
   await expect(panel.locator(".panel-config-popover")).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(
-    panel.locator('[data-toolbar-trigger="appearance"]'),
-  ).toBeFocused();
+  await expect(panel.locator(".panel-line-width")).toBeFocused();
   for (const width of [1100, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     const fits = await page
@@ -250,7 +238,6 @@ test("UI fonts and sizes apply consistently to controls, muted text, and the sig
       .evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
     expect(size).toBeCloseTo((12 * 14) / 13, 3);
   }
-  await openPanelGroup(page.locator(".panel").first(), "appearance");
   await page.locator(".panel-line-width").first().click();
   for (const selector of [
     ".panel-config-title",

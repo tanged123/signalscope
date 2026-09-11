@@ -1,5 +1,10 @@
 # Plot UI refinement review
 
+Latest review restores the inline toolbar. The Simple legend contains line
+samples and names; search, bulk actions, encoding controls, and detailed readouts
+remain in Expanded and Docked legends. The mode picker now reads Collapsed,
+Simple, Expanded, and Docked. [Simple legend capture](after-simple.png).
+
 These captures show the same 48-signal workspace (86,400 samples) in the running
 application, using visible Chromium at device scale 1. The left legend floats;
 the right legend is docked. Signals 1 and 2 are focused, signals 2 and 3 are
@@ -14,13 +19,9 @@ hidden, and the other visible signals are dimmed to 35% by the existing rule.
 
 ![After, native scale](after-native.png)
 
-Panel configuration now uses Data & axes, Appearance, and Analysis dropdowns
-with visible summaries, following the subsequent review. Assignment and axis
-controls moved into Data & axes; width, dimming, and legend presentation moved
-into Appearance; statistics and tips moved into Analysis. Title, bindings, and
-layout actions stay outside. Existing setting pickers retain their actions and
-return focus to the group trigger. `c:` reads `color:`, `axis` reads `limits`,
-and the width sample has a text label. Long paths preserve their distinguishing suffixes
+Controls remain inline and wrap by purpose. `c:` now reads `color:`, `axis`
+reads `limits`, and the width sample has a text label. Existing popovers and
+actions retain their behavior. Long paths preserve their distinguishing suffixes
 and expose their full names in tooltips. The
 [control inventory and typography details](../../frontend/src/styles/README.md#plot-readability)
 document the changes.
@@ -53,13 +54,9 @@ To repeat the baseline capture, serve the base revision on port 4174 and set
 
 ## Validation status
 
-The frontend gate passed all 2,869 tests, lint, generated-schema checks, build,
-and snapshot artifact checks. The affected browser run passed 28 checks,
-including toolbar keyboard navigation, dense signal states, enlarged fonts,
-floating and docked legends, linked axes, cursor modes, and workspace layouts.
-
-Three browser checks required follow-up: Help passed on rerun; the explicit-X
-test passed after updating its limits-editor anchor and focus expectations to
-the visible Data & axes trigger. Theme cycling still failed on rerun. Theme
-shortcut handling was not changed by this patch. Validation used visible
-Chromium, not a packaged Electron build.
+Both focused checks passed: inline toolbar access and the dense-workspace
+legend check, including Simple/Expanded switching and keyboard selection.
+The e2e wrapper also passed frontend typechecking and builds.
+Earlier broader results belong to previous revisions; no broad suite
+was rerun for this follow-up. Validation uses visible Chromium, not packaged
+Electron.

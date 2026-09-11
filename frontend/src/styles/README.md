@@ -39,10 +39,18 @@ independent; increasing both can still enlarge the legend. Axis sizes are unchan
 The signal browser uses 26px rows at the default UI size and scales its virtual
 row geometry with font changes. Smaller UI sizes retain 22px compact rows.
 Legend roster/rail rows start at 26px and grow with plot text; the existing
-compact keys mode retains a 24px minimum. Numeric columns use tabular numerals
+Simple legend retains a 24px minimum. Numeric columns use tabular numerals
 and grow with plot text. Long names truncate with full-path tooltips; encoding
 summaries and inspector controls wrap within narrow legends.
 Statistics use shared column widths and scroll their headers with the values.
+
+Simple legends show line samples and names, with selection and independent
+hidden/dimmed indicators. Search, bulk actions, encodings, inspectors, section
+headings, tips, and footers belong to Expanded and Docked legends. The separate
+statistics toggle still exposes its explicitly requested readout.
+The visible mode labels are Collapsed (count indicator), Simple (line key),
+Expanded (floating controls), and Docked (controls at a plot edge). Serialized
+values remain `badge`, `keys`, `roster`, and `rail` for compatibility.
 
 Expanded legends use compact bordered buttons in the UI font for
 Select all / Clear selection, Dim all / Undim all, and
@@ -55,16 +63,9 @@ the transitions using existing focus and override fields. `ui/legend-bulk-action
 owns the buttons, and their keyboard focus survives refreshes. Session/snapshot
 schemas and the renderer resolution rules are unchanged.
 
-The panel header exposes Data & axes, Appearance, and Analysis dropdowns with
-visible configuration summaries. Truncated summaries retain their full text in
-tooltips; group buttons wrap at narrow widths. Data & axes contains assignments,
-axis presentation, and limits; Appearance contains width, dimming, and legend
-presentation; Analysis contains statistics and tips. Title, binding summaries,
-and panel lifecycle actions stay outside. Setting pickers replace the group
-dropdown and return focus to its button. Tab, arrow keys, and Escape provide
-keyboard paths. Existing shortcuts and legend bulk actions remain available.
-[ADR 0065](../../../docs/adr/0065-panel-toolbar-groups.md) records the shared
-toolbar contract and Line2D control ownership. The control inventory is:
+The panel header keeps every control inline. Groups wrap as panels narrow,
+with seams between assignments, axes, appearance, and readouts. Nothing moved
+into a new popover. The control inventory and retained behavior are:
 
 | Control                           | Behavior                                                                |
 | --------------------------------- | ----------------------------------------------------------------------- |
@@ -77,7 +78,7 @@ toolbar contract and Line2D control ownership. The control inventory is:
 | Limits                            | Existing ranges, scales, direction, and equal units (previously `axis`) |
 | Width                             | Panel line-width default; now labeled beside the line sample            |
 | Dim others                        | Existing opacity choice for non-focused traces                          |
-| Legend                            | Badge, compact keys, roster, or docked rail                             |
+| Legend                            | Collapsed, Simple, Expanded, or Docked                                  |
 | Statistics                        | Toggle visible-region columns                                           |
 | Tips                              | Existing labels/markers/visibility and pin actions                      |
 | Right/down split, maximize, close | Existing panel lifecycle actions                                        |

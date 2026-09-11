@@ -7,10 +7,6 @@
 
 ## Context
 
-The inline-control rule below is amended by
-[ADR 0065](0065-panel-toolbar-groups.md): per-panel configuration uses three
-dropdown groups with visible summaries.
-
 Dataset totals appeared in three corners and the global Layout menu duplicated
 per-panel legend settings. Help opened a command palette whose focus was then
 taken by the application menu. The session title was derived only from its file.

@@ -275,7 +275,6 @@ Before adding a helper, inspect these owners and their tests.
 | ------------------------------------------- | -------------------------------------------------------------------------------- |
 | Required DOM slots, pointer capture         | `ui/dom.ts`: `required`, `requiredSlot`, `bindPointerDrag`                       |
 | Panel chrome and status                     | `ui/panel-shell.ts`                                                              |
-| Panel toolbar groups and summaries          | `ui/panel-toolbar.ts`; Line2D supplies controls through `ui/line-toolbar.ts`     |
 | Legend geometry and docking                 | `ui/legend-rail.ts` via `LegendRailHost`                                         |
 | Statistic cells, spans, CSV/download        | `ui/legend-stats.ts`                                                             |
 | Series property inspector                   | `ui/series-inspector.ts`; value inputs and close/mute/patch callbacks            |

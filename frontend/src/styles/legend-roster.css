@@ -184,6 +184,16 @@
   padding-block: 3px;
 }
 
+.plot-legend-simple-row {
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  flex: none;
+}
+
+.plot-legend-line-sample {
+  width: 24px;
+  border-top-style: solid;
+}
+
 .plot-series-state {
   color: var(--fg-3);
   font: inherit;

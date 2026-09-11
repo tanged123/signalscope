@@ -2,17 +2,19 @@ import { axisControlsMarkup } from "./panel-axes";
 import { required } from "./dom";
 import { formatToolbarNumber } from "./series-inspector";
 import { showPanelMenu, type MenuOption } from "./panel-menu";
-import {
-  PanelToolbar,
-  panelToolbarAnchor,
-  type PanelToolbarGroups,
-} from "./panel-toolbar";
+import { DEFAULT_PANEL_LINE_WIDTH } from "../app/style-defaults";
 import type {
   AnnotationDisplay,
   LegendState,
   PanelState,
 } from "../generated/session";
-import { SIGNAL_DRAG_TYPE, SET_DRAG_TYPE, hasDragType } from "./panel-shell";
+
+const LEGEND_LABELS: Record<LegendState, string> = {
+  badge: "Collapsed",
+  keys: "Simple",
+  roster: "Expanded",
+  rail: "Docked",
+};
 
 export interface LineToolbarActions {
   toggleStats(): void;
@@ -27,7 +29,6 @@ export interface LineToolbarActions {
 }
 
 export class LineToolbar {
-  private readonly toolbar: PanelToolbar;
   private readonly abort = new AbortController();
   private state: PanelState | null = null;
   private menuCleanup: (() => void) | null = null;
@@ -37,37 +38,18 @@ export class LineToolbar {
     slot: HTMLElement,
     private readonly actions: LineToolbarActions,
   ) {
-    const content = (markup: string): HTMLElement => {
-      const node = document.createElement("div");
-      node.className = "panel-toolbar-controls";
-      node.innerHTML = markup;
-      return node;
-    };
-    const groups: PanelToolbarGroups = {
-      data: {
-        summary: "",
-        controls: content(
-          `<button class="panel-action panel-axis-toggle" type="button" title="Switch axis presentation">axes: gutter</button>${axisControlsMarkup()}`,
-        ),
-      },
-      appearance: {
-        summary: "",
-        controls:
-          content(`<button class="panel-toolbar-control panel-line-width" type="button" title="Default line width for this panel" aria-label="Line width"><span class="line-width-sample" aria-hidden="true"></span>width <span class="panel-line-width-value"></span> <span class="toolbar-caret">▾</span></button>
-          <button class="panel-toolbar-control panel-ghost-opacity" type="button" title="Dim non-focused traces; keep them visible">dim others <b class="panel-ghost-value"></b> <span class="toolbar-caret">▾</span></button>
-          <button class="panel-toolbar-control panel-legend-state" type="button" title="Legend type">legend <b class="panel-legend-value"></b> <span class="toolbar-caret">▾</span></button>`),
-      },
-      analysis: {
-        summary: "",
-        controls:
-          content(`<button class="panel-action panel-stats-toggle" type="button" title="Toggle statistics columns (S)" aria-pressed="false">Σ <span>stats</span></button>
-          <button class="panel-toolbar-control panel-tips" type="button" title="Data tips: labels, markers, visibility, and actions">tips <b class="panel-tips-value"></b> <span class="toolbar-caret">▾</span></button>`),
-      },
-    };
-    this.toolbar = new PanelToolbar(host, slot, groups, () => {
-      this.closeMenu();
-      actions.beforeOpen();
-    });
+    slot.innerHTML = `<span class="panel-toolbar-group panel-toolbar-axes" role="group" aria-label="Plot axes">
+        <button class="panel-action panel-axis-toggle" title="Switch axis presentation">axes: gutter</button>
+        ${axisControlsMarkup()}</span>
+      <span class="panel-toolbar-group" role="group" aria-label="Plot appearance">
+        <button class="panel-toolbar-control panel-line-width" type="button" title="Default line width for this panel" aria-label="Line width"><span class="line-width-sample" aria-hidden="true"></span>width <span class="panel-line-width-value">${DEFAULT_PANEL_LINE_WIDTH.toFixed(1)}</span> <span class="toolbar-caret">▾</span></button>
+        <button class="panel-toolbar-control panel-ghost-opacity" type="button" title="Dim non-focused traces; keep them visible">dim others <b class="panel-ghost-value">none</b> <span class="toolbar-caret">▾</span></button>
+      </span>
+      <span class="panel-toolbar-group" role="group" aria-label="Plot readouts">
+        <button class="panel-toolbar-control panel-legend-state" type="button" title="Legend: collapsed indicator, simple line key, expanded controls, or docked controls">legend <b class="panel-legend-value">Simple</b> <span class="toolbar-caret">▾</span></button>
+        <button class="panel-action panel-stats-toggle" title="Toggle statistics columns (S)" aria-pressed="false">Σ <span>stats</span></button>
+        <button class="panel-toolbar-control panel-tips" type="button" title="Data tips: labels, markers, visibility, and actions">tips <b class="panel-tips-value">0</b> <span class="toolbar-caret">▾</span></button>
+      </span>`;
     const bind = (
       selector: string,
       run: (anchor: HTMLElement) => void,
@@ -87,25 +69,9 @@ export class LineToolbar {
     bind(".panel-ghost-opacity", (anchor) => this.openGhost(anchor));
     bind(".panel-legend-state", (anchor) => this.openLegend(anchor));
     bind(".panel-tips", (anchor) => this.openTips(anchor));
-    required(host, '[data-toolbar-trigger="data"]').addEventListener(
-      "dragenter",
-      (event) => {
-        const drag = event as DragEvent;
-        if (
-          hasDragType(drag, SIGNAL_DRAG_TYPE) ||
-          hasDragType(drag, SET_DRAG_TYPE)
-        )
-          this.toolbar.open("data", false, false);
-      },
-      { signal: this.abort.signal },
-    );
   }
 
-  update(
-    state: PanelState,
-    count: number,
-    labels: { x: string; color: string },
-  ): void {
+  update(state: PanelState): void {
     this.state = state;
     const axis = required<HTMLElement>(this.host, ".panel-axis-toggle");
     axis.textContent = `axes: ${state.axis_style}`;
@@ -117,33 +83,14 @@ export class LineToolbar {
         : `${String(Math.round(state.ghost_opacity * 100))}%`;
     required(this.host, ".panel-line-width-value").textContent = width;
     required(this.host, ".panel-ghost-value").textContent = dim;
-    required(this.host, ".panel-legend-value").textContent = state.legend_state;
+    required(this.host, ".panel-legend-value").textContent =
+      LEGEND_LABELS[state.legend_state];
     required(this.host, ".panel-tips-value").textContent = String(
       state.annotations.length,
     );
     required(this.host, ".panel-stats-toggle").setAttribute(
       "aria-pressed",
       String(state.show_stats),
-    );
-    const limits =
-      state.x_range !== null ||
-      state.y_range !== null ||
-      state.x_scale === "log" ||
-      state.y_scale === "log" ||
-      state.x_reversed === true ||
-      state.y_reversed === true ||
-      state.axis_equal;
-    this.toolbar.setSummary(
-      "data",
-      `${labels.x} · ${String(count)} Y · ${state.axis_style}${labels.color === "none" ? "" : ` · C: ${labels.color}`}${limits ? " · custom limits" : ""}`,
-    );
-    this.toolbar.setSummary(
-      "appearance",
-      `${String(state.line_width)}px · others ${dim === "none" ? "off" : dim} · ${state.legend_state}`,
-    );
-    this.toolbar.setSummary(
-      "analysis",
-      `stats ${state.show_stats ? "on" : "off"} · ${String(state.annotations.length)} tips${state.annotation_display === "labels" ? "" : ` · ${state.annotation_display}`}`,
     );
   }
 
@@ -154,7 +101,6 @@ export class LineToolbar {
 
   dispose(): void {
     this.closeMenu();
-    this.toolbar.dispose();
     this.abort.abort();
   }
 
@@ -165,12 +111,7 @@ export class LineToolbar {
   ): void {
     this.closeMenu();
     this.actions.beforeOpen();
-    this.menuCleanup = showPanelMenu(
-      this.host,
-      panelToolbarAnchor(anchor),
-      label,
-      options,
-    );
+    this.menuCleanup = showPanelMenu(this.host, anchor, label, options);
   }
 
   private openWidth(anchor: HTMLElement): void {
@@ -218,7 +159,7 @@ export class LineToolbar {
       anchor,
       "LEGEND TYPE",
       (["badge", "keys", "roster", "rail"] as const).map((legend) => ({
-        label: legend,
+        label: LEGEND_LABELS[legend],
         active: state.legend_state === legend,
         run: () => this.actions.setLegend(legend),
       })),

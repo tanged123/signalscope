@@ -1,11 +1,17 @@
 # ADR 0065: Three panel toolbar groups
 
-- Status: Accepted
+- Status: Withdrawn after UI review
 - Date: 2026-09-11
 - Amends: [ADR 0058](0058-session-title-and-contextual-chrome.md), replacing
   individually inline plot controls with three explicit dropdown groups.
 
 ## Context
+
+Follow-up review rejected the dropdown groups because they obscured information
+and frequent actions. The header again uses individually visible controls with
+subtle group seams, as in ADR 0058. The shared dropdown component was removed;
+`LineToolbar` retains ownership of the existing inline controls and pickers.
+The original decision below is retained as history and is not a requirement.
 
 Spacing alone did not make the panel header's control groups clear. The accepted
 UI review requests Data & axes, Appearance, and Analysis dropdowns, with current

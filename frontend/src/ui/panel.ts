@@ -1,5 +1,6 @@
 import { LineToolbar } from "./line-toolbar";
 import { legendBulkActions } from "./legend-bulk-actions";
+import { legendKeys } from "./legend-keys";
 import type { PanelSeriesAction } from "../app/panel-series-actions";
 import { applySeriesRowState, seriesStateLabel } from "./series-row-state";
 import { PanelAxes } from "./panel-axes";
@@ -843,7 +844,7 @@ export class PanelView {
     this.lastState = rendered;
     this.shell.setTitle(rendered.title, maximized);
     this.axes.update(state);
-    this.toolbar.update(rendered, rendered.series.length, this.axes.labels());
+    this.toolbar.update(rendered);
     this.updateBindings(rendered);
     this.pruneAnnotationUiState(rendered);
     this.updatePlotLegend(rendered);
@@ -1507,7 +1508,7 @@ export class PanelView {
       );
       required<HTMLElement>(summary, "span:nth-of-type(2)").textContent =
         `${String(ghosts)} dimmed`;
-      summary.title = "Expand legend keys";
+      summary.title = "Show simple legend";
       summary.addEventListener("click", () => {
         this.callbacks.onLegendLayout(this.id, { state: "keys" });
       });
@@ -1529,7 +1530,7 @@ export class PanelView {
       undock.className = "plot-legend-undock";
       undock.type = "button";
       undock.textContent = "⇥";
-      undock.title = "Return legend to floating roster";
+      undock.title = "Float expanded legend";
       undock.addEventListener("click", () => this.floatPlotLegend(legend));
       header.append(title);
       if (state.show_stats) header.append(this.statsScopeLabel());
@@ -1574,7 +1575,9 @@ export class PanelView {
       state.legend_state === "roster" ? " series" : ""
     } ▾`;
     title.title =
-      state.legend_state === "roster" ? "Show compact keys" : "Show roster";
+      state.legend_state === "roster"
+        ? "Show simple legend"
+        : "Show expanded legend";
     title.addEventListener("click", () => {
       this.callbacks.onLegendLayout(this.id, {
         state: state.legend_state === "roster" ? "keys" : "roster",
@@ -1584,7 +1587,7 @@ export class PanelView {
     collapse.className = "plot-legend-collapse";
     collapse.type = "button";
     collapse.textContent = "⌄";
-    collapse.title = "Collapse legend to badge";
+    collapse.title = "Collapse legend";
     collapse.addEventListener("click", () => {
       this.callbacks.onLegendLayout(this.id, { state: "badge" });
     });
@@ -1602,13 +1605,17 @@ export class PanelView {
     const cornerResize = this.legendResizeHandle("corner", legend);
     legend.replaceChildren(
       header,
-      legendBulkActions(state.series, (action) =>
-        this.callbacks.onSeriesAction(this.id, action),
-      ),
-      legendColorControls(state, this.plotLegendEncodingRow(state), () =>
-        this.axes.openColor(),
-      ),
-      ...this.plotLegendDrawers(state),
+      ...(state.legend_state === "roster" || state.show_stats
+        ? [
+            legendBulkActions(state.series, (action) =>
+              this.callbacks.onSeriesAction(this.id, action),
+            ),
+            legendColorControls(state, this.plotLegendEncodingRow(state), () =>
+              this.axes.openColor(),
+            ),
+            ...this.plotLegendDrawers(state),
+          ]
+        : []),
       content,
       rightResize,
       bottomResize,
@@ -1741,48 +1748,24 @@ export class PanelView {
   }
 
   private plotLegendKeys(state: RenderPanelState): HTMLElement {
-    const content = document.createElement("div");
-    content.className = "plot-legend-content plot-legend-keys";
-    const all = seriesLegendRows(this.callbacks.catalog(), state);
-    const shown = this.focusOnly ? all.filter((row) => row.focused) : all;
-    const title = this.plotLegendGroupTitle(
-      state,
-      shown.length,
-      all.filter((row) => row.focused).length,
+    const rows = seriesLegendRows(this.callbacks.catalog(), state);
+    return legendKeys(
+      rows,
+      (row) => seriesColor(row.series),
+      (event, item) => {
+        if (event.altKey) this.callbacks.onMuteSeries(this.id, item.series.ref);
+        else
+          this.selectFocusRows(
+            event,
+            "legend",
+            item.value,
+            rows,
+            (row) => row.value,
+            (row) => this.focusEntryForSeries(row.series),
+          );
+      },
+      (path) => this.setEmphasis(path),
     );
-    title.className = "plot-legend-section-title plot-legend-group-title";
-    const rows = document.createElement("div");
-    rows.className = "plot-legend-key-rows";
-    rows.hidden = !this.signalsExpanded;
-    rows.append(
-      ...shown.map((row) => this.plotLegendSeriesRow(state, row, shown)),
-    );
-    rows.addEventListener("click", (event) => {
-      if (event.target === rows) this.callbacks.onClearFocus(this.id);
-    });
-    const ghosts = state.series.filter(
-      (series) => series.visible && series.opacity < 1,
-    ).length;
-    const footer = this.plotLegendFooter(state, ghosts, () => {
-      this.callbacks.onLegendLayout(this.id, { state: "roster" });
-    });
-    content.append(title, rows, this.plotLegendTips(state), footer);
-    if (
-      state.focus.length === 0 &&
-      ghosts > 0 &&
-      !state.legend_hint_dismissed
-    ) {
-      const hint = document.createElement("button");
-      hint.className = "plot-legend-hint";
-      hint.type = "button";
-      hint.textContent = "hover a dimmed line to explore · click to focus  ×";
-      hint.title = "Dismiss hint";
-      hint.addEventListener("click", () => {
-        this.callbacks.onLegendLayout(this.id, { hintDismissed: true });
-      });
-      content.append(hint);
-    }
-    return content;
   }
 
   private plotLegendGroupTitle(
