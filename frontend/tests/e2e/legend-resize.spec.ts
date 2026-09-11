@@ -1,10 +1,11 @@
-import { expect, gotoApp, test } from "./fixtures";
+import { expect, gotoApp, test, openPanelGroup } from "./fixtures";
 
 test("legend rail follows the pointer without reverting between frames", async ({
   page,
 }) => {
   await page.route("**/api/health", (route) => route.fulfill({ status: 503 }));
   await gotoApp(page);
+  await openPanelGroup(page.locator(".panel").first(), "appearance");
   await page.locator(".panel").first().locator(".panel-legend-state").click();
   await page.getByRole("menuitemradio", { name: "rail", exact: false }).click();
   const panel = page.locator(".panel").first();

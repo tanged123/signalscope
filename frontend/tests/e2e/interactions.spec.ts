@@ -1,4 +1,4 @@
-import { expect, gotoApp, test } from "./fixtures";
+import { expect, gotoApp, test, openPanelGroup } from "./fixtures";
 import type { Page } from "@playwright/test";
 
 interface AxisLabelProbe {
@@ -126,6 +126,8 @@ test.describe("desktop plot interactions", () => {
     await page.mouse.wheel(0, -240);
     await expect(readout).not.toHaveText(beforeWindow ?? "");
 
+    await openPanelGroup(panel, "analysis");
+
     await panel.locator(".panel-stats-toggle").click();
     const stats = panel.locator(".plot-legend-stats");
     await expect(stats).toBeVisible();
@@ -191,6 +193,8 @@ test.describe("desktop plot interactions", () => {
     await drawer.getByRole("button", { name: "channel" }).click();
     await expect(colorEncoding).toContainText("color ← channel");
     await expect(drawer).toBeHidden();
+
+    await openPanelGroup(panel, "analysis");
 
     await panel.locator(".panel-stats-toggle").click();
     const swatch = panel

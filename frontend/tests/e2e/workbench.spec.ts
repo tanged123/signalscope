@@ -1,4 +1,4 @@
-import { expect, gotoApp, test } from "./fixtures";
+import { expect, gotoApp, test, openPanelGroup } from "./fixtures";
 import type { PanelView as PanelViewClass } from "../../src/ui/panel";
 import type { FormulaBar as FormulaBarClass } from "../../src/ui/formula-bar";
 import type { Catalog as CatalogClass } from "../../src/app/catalog";
@@ -451,6 +451,10 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
     ".panel-tips",
     ".panel-legend-state",
   ]) {
+    await openPanelGroup(
+      panel,
+      selector === ".panel-tips" ? "analysis" : "appearance",
+    );
     await panel.locator(selector).click();
     const menu = panel.locator(".panel-config-popover");
     await expect(menu).toBeVisible();
@@ -480,6 +484,8 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
     await page.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);
   }
+
+  await openPanelGroup(panel, "analysis");
 
   await panel.locator(".panel-tips").click();
   await panel.getByRole("menuitem", { name: "clear all" }).click();
@@ -1111,6 +1117,7 @@ test("legend console replaces the strip and supports per-plot states", async ({
   const panel = page.locator(".panel").first();
   await expect(panel.locator(".panel-legend-strip")).toHaveCount(0);
   await expect(panel.locator(".plot-series-legend")).toBeVisible();
+  await openPanelGroup(page.locator(".panel").first(), "appearance");
   await page.locator(".panel").first().locator(".panel-legend-state").click();
   await page
     .getByRole("menuitemradio", { name: "badge", exact: false })

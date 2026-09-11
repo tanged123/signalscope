@@ -1,4 +1,10 @@
-import { devices, expect, test as base, type Page } from "@playwright/test";
+import {
+  devices,
+  expect,
+  test as base,
+  type Page,
+  type Locator,
+} from "@playwright/test";
 
 const testBase = base.extend({
   page: async ({ playwright }, use, testInfo) => {
@@ -71,3 +77,13 @@ export async function gotoApp(page: Page): Promise<void> {
 }
 
 export { expect };
+
+export async function openPanelGroup(
+  panel: Locator,
+  group: "data" | "appearance" | "analysis",
+): Promise<void> {
+  const trigger = panel.locator(`[data-toolbar-trigger="${group}"]`);
+  if (!(await panel.locator(`[data-toolbar-group="${group}"]`).isVisible()))
+    await trigger.click();
+  await expect(panel.locator(`[data-toolbar-group="${group}"]`)).toBeVisible();
+}

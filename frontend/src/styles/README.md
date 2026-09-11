@@ -55,9 +55,16 @@ the transitions using existing focus and override fields. `ui/legend-bulk-action
 owns the buttons, and their keyboard focus survives refreshes. Session/snapshot
 schemas and the renderer resolution rules are unchanged.
 
-The panel header keeps every control inline. Groups wrap as panels narrow,
-with seams between assignments, axes, appearance, and readouts. Nothing moved
-into a new popover. The control inventory and retained behavior are:
+The panel header exposes Data & axes, Appearance, and Analysis dropdowns with
+visible configuration summaries. Truncated summaries retain their full text in
+tooltips; group buttons wrap at narrow widths. Data & axes contains assignments,
+axis presentation, and limits; Appearance contains width, dimming, and legend
+presentation; Analysis contains statistics and tips. Title, binding summaries,
+and panel lifecycle actions stay outside. Setting pickers replace the group
+dropdown and return focus to its button. Tab, arrow keys, and Escape provide
+keyboard paths. Existing shortcuts and legend bulk actions remain available.
+[ADR 0065](../../../docs/adr/0065-panel-toolbar-groups.md) records the shared
+toolbar contract and Line2D control ownership. The control inventory is:
 
 | Control                           | Behavior                                                                |
 | --------------------------------- | ----------------------------------------------------------------------- |

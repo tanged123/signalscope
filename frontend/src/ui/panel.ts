@@ -1,4 +1,4 @@
-import { lineToolbarMarkup } from "./line-toolbar";
+import { LineToolbar } from "./line-toolbar";
 import { legendBulkActions } from "./legend-bulk-actions";
 import type { PanelSeriesAction } from "../app/panel-series-actions";
 import { applySeriesRowState, seriesStateLabel } from "./series-row-state";
@@ -55,7 +55,6 @@ import {
 import { ChartHost, type ChartRenderRequest } from "../render/chart-host";
 import type { GpuContext } from "../render/gpu-context";
 import { seriesInspector, formatToolbarNumber } from "./series-inspector";
-import { showPanelMenu } from "./panel-menu";
 
 const CHART_HOST_INITIALIZATION_TIMEOUT_MS = 5_000;
 // A newly acquired device can outlive its first canvas configuration attempt.
@@ -446,7 +445,7 @@ export class PanelView {
   private overrideDrawer = false;
   private statsColumnsDrawer = false;
   private bindingCleanup: (() => void) | null = null;
-  private panelConfigCleanup: (() => void) | null = null;
+  private readonly toolbar: LineToolbar;
   private plotLegendPosition: { x: number; y: number } | null = null;
   private plotLegendSize: { width: number; height: number } | null = null;
   private plotLegendAnchor: LegendAnchor | null = null;
@@ -477,7 +476,22 @@ export class PanelView {
         callbacks.onRenameTitle(panelId, title),
     });
     this.element = this.shell.element;
-    this.shell.slots.controls.innerHTML = lineToolbarMarkup();
+    this.toolbar = new LineToolbar(this.element, this.shell.slots.controls, {
+      toggleStats: () => callbacks.onToggleStats(this.id),
+      toggleAxes: () => callbacks.onToggleAxisStyle(this.id),
+      setWidth: (width) => callbacks.onSetPanelLineWidth(this.id, width),
+      toggleGhost: () => callbacks.onToggleGhostMode(this.id),
+      setGhostOpacity: (opacity) =>
+        callbacks.onSetGhostOpacity(this.id, opacity),
+      setLegend: (state) => callbacks.onLegendLayout(this.id, { state }),
+      setTips: (display) =>
+        callbacks.onSetAnnotationDisplay?.(this.id, display),
+      clearTips: () => {
+        this.annotationUi.selectedIds.clear();
+        callbacks.onClearAnnotations?.(this.id);
+      },
+      beforeOpen: () => this.axes.close(),
+    });
     this.chartHostElement = document.createElement("div");
     this.chartHostElement.className = "chart-host";
     this.chartHostElement.hidden = true;
@@ -503,7 +517,7 @@ export class PanelView {
       },
       addY: (paths) => callbacks.onDropSignals(this.id, paths),
       addYSet: (id) => callbacks.onDropSet(this.id, id),
-      beforeOpen: () => this.closePanelConfig(),
+      beforeOpen: () => this.toolbar.closeMenu(),
     });
     this.interactions = new PlotInteractionController(this.overlay, {
       layout: () => this.activeLayout(),
@@ -667,52 +681,6 @@ export class PanelView {
   }
 
   private bind(): void {
-    required(this.element, ".panel-stats-toggle").addEventListener(
-      "click",
-      () => {
-        this.callbacks.onToggleStats(this.id);
-      },
-    );
-    required(this.element, ".panel-axis-toggle").addEventListener(
-      "click",
-      () => {
-        this.callbacks.onToggleAxisStyle(this.id);
-      },
-    );
-    required(this.element, ".panel-line-width").addEventListener(
-      "click",
-      (event) => {
-        if (this.lastState !== null)
-          this.openLineWidthMenu(
-            this.lastState,
-            event.currentTarget as HTMLElement,
-          );
-      },
-    );
-    required(this.element, ".panel-ghost-opacity").addEventListener(
-      "click",
-      (event) => {
-        if (this.lastState !== null)
-          this.openGhostMenu(
-            this.lastState,
-            event.currentTarget as HTMLElement,
-          );
-      },
-    );
-    required(this.element, ".panel-legend-state").addEventListener(
-      "click",
-      (event) => {
-        if (this.lastState !== null)
-          this.openLegendStateMenu(
-            this.lastState,
-            event.currentTarget as HTMLElement,
-          );
-      },
-    );
-    required(this.element, ".panel-tips").addEventListener("click", (event) => {
-      if (this.lastState !== null)
-        this.openTipsMenu(this.lastState, event.currentTarget as HTMLElement);
-    });
     this.element.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         if (this.annotationUi.selectedIds.size > 0) {
@@ -722,7 +690,7 @@ export class PanelView {
         } else if (this.emphasizePaths !== null) this.clearHover();
         else this.callbacks.onClearFocus(this.id);
         this.closeBindingPopover();
-        this.closePanelConfig();
+        this.toolbar.closeMenu();
         const drawerOpen =
           this.encodingDrawer !== null ||
           this.overrideDrawer ||
@@ -874,28 +842,8 @@ export class PanelView {
     this.lastInputState = state;
     this.lastState = rendered;
     this.shell.setTitle(rendered.title, maximized);
-    const axisToggle = required<HTMLButtonElement>(
-      this.element,
-      ".panel-axis-toggle",
-    );
-    axisToggle.textContent = `axes: ${rendered.axis_style}`;
-    axisToggle.title = `Switch to ${rendered.axis_style === "gutter" ? "inline" : "gutter"} axes`;
-    axisToggle.hidden = false;
     this.axes.update(state);
-    required<HTMLElement>(this.element, ".panel-line-width-value").textContent =
-      formatToolbarNumber(rendered.line_width);
-    required<HTMLElement>(this.element, ".panel-ghost-value").textContent =
-      rendered.ghost_mode === "all"
-        ? "none"
-        : `${String(Math.round(rendered.ghost_opacity * 100))}%`;
-    required<HTMLElement>(this.element, ".panel-legend-value").textContent =
-      rendered.legend_state;
-    required<HTMLElement>(this.element, ".panel-tips-value").textContent =
-      String(rendered.annotations.length);
-    required<HTMLButtonElement>(
-      this.element,
-      ".panel-stats-toggle",
-    ).setAttribute("aria-pressed", String(rendered.show_stats));
+    this.toolbar.update(rendered, rendered.series.length, this.axes.labels());
     this.updateBindings(rendered);
     this.pruneAnnotationUiState(rendered);
     this.updatePlotLegend(rendered);
@@ -1111,7 +1059,7 @@ export class PanelView {
   dispose(): void {
     this.disposed = true;
     this.axes.dispose();
-    this.closePanelConfig();
+    this.toolbar.dispose();
     this.releaseGpu();
     this.interactions.dispose();
     this.shell.dispose();
@@ -2999,106 +2947,6 @@ export class PanelView {
   private closeBindingPopover(): void {
     this.bindingCleanup?.();
     this.bindingCleanup = null;
-  }
-
-  private openLineWidthMenu(
-    state: RenderPanelState,
-    anchor: HTMLElement,
-  ): void {
-    this.openPanelMenu(
-      anchor,
-      "LINE WIDTH · PANEL DEFAULT",
-      [1, 1.4, 1.5, 2, 3].map((width) => ({
-        label: `${formatToolbarNumber(width)} px`,
-        active: Math.abs(state.line_width - width) < 0.001,
-        run: () => this.callbacks.onSetPanelLineWidth(this.id, width),
-      })),
-    );
-  }
-
-  private openGhostMenu(state: RenderPanelState, anchor: HTMLElement): void {
-    this.openPanelMenu(anchor, "DIM OTHER SERIES", [
-      {
-        label: "none · show full color",
-        active: state.ghost_mode === "all",
-        run: () => {
-          if (state.ghost_mode !== "all")
-            this.callbacks.onToggleGhostMode(this.id);
-        },
-      },
-      ...[0.2, 0.35, 0.5].map((opacity) => ({
-        label: `to ${String(Math.round(opacity * 100))}% opacity`,
-        active:
-          state.ghost_mode === "ghost" &&
-          Math.abs(state.ghost_opacity - opacity) < 0.001,
-        run: () => {
-          this.callbacks.onSetGhostOpacity(this.id, opacity);
-          if (state.ghost_mode !== "ghost")
-            this.callbacks.onToggleGhostMode(this.id);
-        },
-      })),
-    ]);
-  }
-
-  private openLegendStateMenu(
-    state: RenderPanelState,
-    anchor: HTMLElement,
-  ): void {
-    this.openPanelMenu(
-      anchor,
-      "LEGEND TYPE",
-      (["badge", "keys", "roster", "rail"] as const).map((legendState) => ({
-        label: legendState,
-        active: state.legend_state === legendState,
-        run: () =>
-          this.callbacks.onLegendLayout(this.id, { state: legendState }),
-      })),
-    );
-  }
-
-  private openTipsMenu(state: RenderPanelState, anchor: HTMLElement): void {
-    this.openPanelMenu(anchor, `TIPS · ${String(state.annotations.length)}`, [
-      ...(["labels", "markers", "hidden"] as const).map((mode) => ({
-        label: mode === "markers" ? "markers only" : mode,
-        active: state.annotation_display === mode,
-        run: () => {
-          this.callbacks.onSetAnnotationDisplay?.(this.id, mode);
-        },
-      })),
-      {
-        label: "clear all",
-        active: false,
-        action: true,
-        run: () => {
-          this.annotationUi.selectedIds.clear();
-          this.callbacks.onClearAnnotations?.(this.id);
-        },
-      },
-    ]);
-  }
-
-  private openPanelMenu(
-    anchor: HTMLElement,
-    label: string,
-    options: readonly {
-      label: string;
-      active: boolean;
-      action?: boolean;
-      run: () => void;
-    }[],
-  ): void {
-    this.closePanelConfig();
-    this.panelConfigCleanup = showPanelMenu(
-      this.element,
-      anchor,
-      label,
-      options,
-    );
-  }
-
-  private closePanelConfig(): void {
-    this.panelConfigCleanup?.();
-    this.panelConfigCleanup = null;
   }
 
   openInspector(path: string): void {

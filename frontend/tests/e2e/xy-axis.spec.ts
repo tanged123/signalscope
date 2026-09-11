@@ -14,7 +14,7 @@ import {
   type SourceSummary,
 } from "../../src/generated/protocol";
 import type { Envelope } from "../../src/app/envelope";
-import { expect, test } from "./fixtures";
+import { expect, test, openPanelGroup } from "./fixtures";
 
 test("live XY axes select unplotted time and source-paired bundles by keyboard", async ({
   page,
@@ -142,6 +142,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
     const panel = page.locator(".panel").first();
     await expect(panel).toBeVisible();
+    await openPanelGroup(panel, "data");
     await panel.locator(".panel-y-axis").click();
     let search = panel.locator(".axis-picker input");
     await search.fill("y · bundle");
@@ -185,9 +186,11 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
       await expect(bindings).toHaveText(yBindings ?? "");
       await expect(panel.locator(".colorbar-canvas")).toBeVisible();
     }
+    await openPanelGroup(panel, "data");
     await panel.locator(".panel-c-axis").click();
     await panel.locator(".axis-picker input").fill("none");
     await panel.locator(".axis-picker input").press("Enter");
+    await openPanelGroup(panel, "data");
     await panel.locator(".panel-x-axis").click();
     search = panel.locator(".axis-picker input");
     await expect(search).toBeFocused();
@@ -205,6 +208,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     );
     await panel.screenshot({ path: testInfo.outputPath("xy-bundle.png") });
     const limitsButton = panel.locator(".panel-axis-limits");
+    await openPanelGroup(panel, "data");
     await limitsButton.click();
     const editor = panel.getByRole("dialog", {
       name: "Axis limits",
@@ -212,7 +216,9 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     });
     await expect(editor).toHaveClass(/panel-config-popover/);
     await expect(editor.getByLabel("C limits mode")).toHaveCount(0);
-    const triggerRect = await limitsButton.boundingBox();
+    const triggerRect = await panel
+      .locator('[data-toolbar-trigger="data"]')
+      .boundingBox();
     const editorRect = await editor.boundingBox();
     expect(triggerRect).not.toBeNull();
     expect(editorRect).not.toBeNull();
@@ -248,7 +254,8 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await expect(equal).toBeChecked();
     await editor.getByRole("button", { name: "Apply", exact: true }).click();
     await expect(editor).toBeHidden();
-    await expect(limitsButton).toBeFocused();
+    await expect(panel.locator('[data-toolbar-trigger="data"]')).toBeFocused();
+    await openPanelGroup(panel, "data");
     await panel.locator(".panel-c-axis").click();
     await panel.locator(".axis-picker input").fill("temperature · bundle");
     await panel.locator(".axis-picker input").press("Enter");
@@ -258,6 +265,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     const colorbar = panel.locator(".colorbar-canvas");
     await expect(colorbar).toBeVisible();
     await expect(colorbar).toHaveAttribute("aria-label", /0 to 100/);
+    await openPanelGroup(panel, "data");
     await panel.locator(".panel-axis-limits").click();
     await expect(
       panel.getByRole("checkbox", { name: "Axis equal", exact: true }),
@@ -279,6 +287,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await expect(panel.locator(".axis-picker input")).toBeFocused();
     await page.keyboard.press("Escape");
     const setLegend = async (mode: string): Promise<void> => {
+      await openPanelGroup(panel, "appearance");
       await panel.locator(".panel-legend-state").click();
       await panel
         .getByRole("menuitemradio", { name: mode, exact: false })
@@ -290,6 +299,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await expect(colorbar).toHaveAttribute("data-placement", "plot");
 
     const axisStyle = panel.locator(".panel-axis-toggle");
+    await openPanelGroup(panel, "data");
     if ((await axisStyle.textContent())?.includes("gutter"))
       await axisStyle.click();
     await expect(axisStyle).toContainText("inline");
@@ -412,6 +422,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     expect(saved.tabs[0]?.panels[0]?.x_range).toEqual([0, 10]);
     expect(saved.tabs[0]?.panels[0]?.axis_equal).toBe(true);
     expect(saved.tabs[0]?.panels[0]?.y_range).toEqual([1, 8]);
+    await openPanelGroup(panel, "data");
     await limitsButton.click();
     for (const axis of ["X", "Y", "C"]) {
       await editor
@@ -463,11 +474,13 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
       { cwd: root },
     );
 
+    await openPanelGroup(panel, "data");
+
     await panel.locator(".panel-x-axis").click();
     await panel.locator(".axis-picker input").fill("two/time");
     await panel.locator(".axis-picker input").press("Enter");
     await expect(panel.locator(".panel-x-axis")).toContainText("two/time");
-    await expect(panel.locator(".panel-y-axis")).toBeVisible();
+    await expect(panel.locator('[data-toolbar-trigger="data"]')).toBeVisible();
     await page.waitForLoadState("networkidle");
     const offlineRequests: string[] = [];
     page.on("request", (request) => {
@@ -484,6 +497,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
       /mismatch|unknown|unavailable|failed/i,
     );
     expect(offlineRequests).toEqual([]);
+    await openPanelGroup(page.locator(".panel"), "data");
     await page.locator(".panel-axis-limits").click();
     await expect(
       page.getByRole("checkbox", { name: "Flip horizontal", exact: true }),
@@ -503,6 +517,7 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await page.screenshot({
       path: testInfo.outputPath("xy-color-offline.png"),
     });
+    await openPanelGroup(page.locator(".panel"), "data");
     await page.locator(".panel-c-axis").click();
     await page.locator(".axis-picker input").fill("none");
     await page.locator(".axis-picker input").press("Enter");

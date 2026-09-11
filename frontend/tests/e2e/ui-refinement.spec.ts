@@ -1,4 +1,4 @@
-import { expect, gotoApp, test } from "./fixtures";
+import { expect, gotoApp, test, openPanelGroup } from "./fixtures";
 import { WorkspaceModel } from "../../src/app/workspace";
 import { seal } from "../../src/app/envelope";
 import { mkdirSync } from "node:fs";
@@ -181,16 +181,6 @@ test("dense workspace readability and independent signal states", async ({
         .evaluate((element) => element.scrollWidth <= element.clientWidth),
     ).toBe(true);
     for (const control of [
-      ".panel-axis-toggle",
-      ".panel-y-axis",
-      ".panel-x-axis",
-      ".panel-c-axis",
-      ".panel-axis-limits",
-      ".panel-line-width",
-      ".panel-ghost-opacity",
-      ".panel-legend-state",
-      ".panel-stats-toggle",
-      ".panel-tips",
       ".panel-split-right",
       ".panel-split-down",
       ".panel-maximize",
@@ -199,6 +189,39 @@ test("dense workspace readability and independent signal states", async ({
       await expect(panel.locator(control)).toBeVisible();
       await panel.locator(control).focus();
       await expect(panel.locator(control)).toBeFocused();
+    }
+    for (const [group, controls] of [
+      [
+        "data",
+        [
+          ".panel-axis-toggle",
+          ".panel-y-axis",
+          ".panel-x-axis",
+          ".panel-c-axis",
+          ".panel-axis-limits",
+        ],
+      ],
+      [
+        "appearance",
+        [".panel-line-width", ".panel-ghost-opacity", ".panel-legend-state"],
+      ],
+      ["analysis", [".panel-stats-toggle", ".panel-tips"]],
+    ] as const) {
+      await openPanelGroup(panel, group);
+      for (const control of controls) {
+        await expect(panel.locator(control)).toBeVisible();
+        await panel.locator(control).focus();
+        await expect(panel.locator(control)).toBeFocused();
+      }
+      expect(
+        await panel
+          .locator(`[data-toolbar-group="${group}"]`)
+          .evaluate((element) => element.scrollWidth <= element.clientWidth),
+      ).toBe(true);
+      await page.keyboard.press("Escape");
+      await expect(
+        panel.locator(`[data-toolbar-trigger="${group}"]`),
+      ).toBeFocused();
     }
     await expect(panel.locator(".plot-series-legend")).toHaveCSS(
       "font-size",
@@ -228,6 +251,7 @@ test("dense workspace readability and independent signal states", async ({
     if (previous !== undefined)
       expect(bound.top).toBeGreaterThanOrEqual(previous.bottom);
   }
+  await openPanelGroup(firstPanel, "analysis");
   await firstPanel.locator(".panel-stats-toggle").click();
   const hiddenStat = firstPanel
     .locator(".plot-stat-row")
@@ -252,6 +276,7 @@ test("dense workspace readability and independent signal states", async ({
       return Math.abs((heading?.x ?? 0) - (value?.x ?? 1000));
     })
     .toBeLessThan(1);
+  await openPanelGroup(firstPanel, "analysis");
   await firstPanel.locator(".panel-stats-toggle").click();
   const actions = firstPanel.getByRole("group", {
     name: "All plot signals",

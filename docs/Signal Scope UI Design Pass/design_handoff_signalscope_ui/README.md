@@ -37,6 +37,9 @@ totals have one home in the bottom bar; the title is editable; per-plot
 appearance/readout controls and chart metrics stay inline; Help opens on demand. The
 global legend menu, repeated metadata, and inactive Follow control are removed.
 The visual tokens and complete per-plot axis requirements below still apply.
+The September 11 review supersedes individually inline plot controls with
+Data & axes, Appearance, and Analysis dropdowns and visible summaries;
+[ADR 0065](../../adr/0065-panel-toolbar-groups.md) defines their shared interface.
 UI labels, muted prose, menus, and signal-tree labels use the selected UI font;
 caption/text/body/heading tokens scale with the UI size preference. Numeric and
 code readouts retain monospace, and plots retain their independent font setting.

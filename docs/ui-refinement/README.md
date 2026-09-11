@@ -14,9 +14,13 @@ hidden, and the other visible signals are dimmed to 35% by the existing rule.
 
 ![After, native scale](after-native.png)
 
-Controls remain inline and wrap by purpose. `c:` now reads `color:`, `axis`
-reads `limits`, and the width sample has a text label. Existing popovers and
-actions retain their behavior. Long paths preserve their distinguishing suffixes
+Panel configuration now uses Data & axes, Appearance, and Analysis dropdowns
+with visible summaries, following the subsequent review. Assignment and axis
+controls moved into Data & axes; width, dimming, and legend presentation moved
+into Appearance; statistics and tips moved into Analysis. Title, bindings, and
+layout actions stay outside. Existing setting pickers retain their actions and
+return focus to the group trigger. `c:` reads `color:`, `axis` reads `limits`,
+and the width sample has a text label. Long paths preserve their distinguishing suffixes
 and expose their full names in tooltips. The
 [control inventory and typography details](../../frontend/src/styles/README.md#plot-readability)
 document the changes.
@@ -49,20 +53,13 @@ To repeat the baseline capture, serve the base revision on port 4174 and set
 
 ## Validation status
 
-The frontend gate passed all 2,866 tests, lint, generated-schema checks, build,
-and snapshot artifact checks. Browser coverage included linked axes, explicit
-signal-X and color bindings, cursor modes, workspace layouts, signal selection,
-and snapshot round trips.
+The frontend gate passed all 2,869 tests, lint, generated-schema checks, build,
+and snapshot artifact checks. The affected browser run passed 28 checks,
+including toolbar keyboard navigation, dense signal states, enlarged fonts,
+floating and docked legends, linked axes, cursor modes, and workspace layouts.
 
-The follow-up legend rerun passed both browser tests, including bulk selection,
-hidden and dimmed combinations, keyboard focus, enlarged fonts, virtual rows,
-statistics alignment, and cursor-tip resizing. The font-setting test now waits
-for each preference change to finish; tips retain their requested height instead
-of shrinking under flex layout pressure. These resolve the two failures recorded
-in the first draft.
-
-Validation used the browser application, not a packaged Electron build.
-
-The button and font-cap follow-up passed 29 affected unit tests and both focused
-browser checks, including hover, keyboard focus, and enlarged plot text with the
-default interface size. The e2e wrapper also checked TypeScript and built the app.
+Three browser checks required follow-up: Help passed on rerun; the explicit-X
+test passed after updating its limits-editor anchor and focus expectations to
+the visible Data & axes trigger. Theme cycling still failed on rerun. Theme
+shortcut handling was not changed by this patch. Validation used visible
+Chromium, not a packaged Electron build.

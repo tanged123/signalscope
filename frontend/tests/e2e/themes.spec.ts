@@ -1,4 +1,4 @@
-import { expect, gotoApp, test } from "./fixtures";
+import { expect, gotoApp, test, openPanelGroup } from "./fixtures";
 import { THEME_ORDER } from "../../src/app/themes";
 
 test("panel focus stays quiet and legends stay opaque during navigation", async ({
@@ -25,6 +25,7 @@ test("panel focus stays quiet and legends stay opaque during navigation", async 
   await page.mouse.up({ button: "right" });
   await expect(page.locator(".gesture-hint")).toHaveText("");
   const control = panel.locator(".panel-axis-limits");
+  await openPanelGroup(panel, "data");
   await page.keyboard.press("Tab");
   await control.focus();
   await expect(control).toHaveCSS("outline-style", "solid");
@@ -84,8 +85,10 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
   await row.dispatchEvent("dragend", { dataTransfer });
   await dataTransfer.dispose();
   await expect(secondPanel.locator(".binding-chip")).toHaveCount(1);
+  await openPanelGroup(secondPanel, "analysis");
   await secondPanel.locator(".panel-stats-toggle").click();
   const firstPanel = page.locator(".panel").first();
+  await openPanelGroup(firstPanel, "appearance");
   await firstPanel.locator(".panel-legend-state").click();
   await firstPanel
     .getByRole("menuitemradio", { name: "roster", exact: false })
@@ -151,9 +154,9 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
       }
       for (const panel of await page.locator(".panel").all()) {
         for (const control of [
-          ".panel-x-axis",
-          ".panel-line-width",
-          ".panel-legend-state",
+          '[data-toolbar-trigger="data"]',
+          '[data-toolbar-trigger="appearance"]',
+          '[data-toolbar-trigger="analysis"]',
           ".panel-split-right",
           ".panel-close",
         ])
