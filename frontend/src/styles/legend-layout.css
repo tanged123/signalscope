@@ -134,7 +134,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-overlay);
   font-family: var(--font-plot);
-  font-size: 10px;
+  font-size: var(--legend-font-size);
   font-variant-numeric: tabular-nums;
   line-height: 1.4;
 }
@@ -262,13 +262,13 @@
   align-items: center;
   gap: 2px;
   padding: 2px 5px;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  overflow: visible;
   background: var(--surface-0);
   border-bottom: 1px solid var(--border-faint);
   color: var(--fg-3);
   font: var(--ui-caption-size) var(--font-ui);
-  scrollbar-width: none;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .plot-legend-encoding-chip {
@@ -419,8 +419,13 @@
   min-height: 0;
 }
 
+.plot-legend-keys,
+.plot-legend-roster {
+  overflow-y: auto;
+}
+
 .plot-legend-key-rows {
-  min-height: 0;
+  min-height: 24px;
   flex: 1;
   overflow-y: auto;
 }
@@ -540,6 +545,7 @@
 }
 
 .plot-legend-label {
+  min-width: 0;
   direction: rtl;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -568,11 +574,13 @@
 
 .plot-legend-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 7px;
 }
 
 .plot-legend-footer button {
+  white-space: nowrap;
   color: inherit;
   font: inherit;
 }

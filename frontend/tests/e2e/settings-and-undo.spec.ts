@@ -34,49 +34,63 @@ test("ctrl+z in a text field edits text, not the workspace", async ({
   await expect(page.locator(".panel")).toHaveCount(2);
 });
 
-test("settings palette adjusts fonts and sizes in place", async ({ page }) => {
+test("settings apply UI fonts, scale text, and reset line width", async ({
+  page,
+}) => {
   await gotoApp(page);
+  const search = page.getByRole("textbox", {
+    name: "Search signals",
+    exact: true,
+  });
+  const initial = await search.evaluate((element) => ({
+    font: getComputedStyle(element).fontFamily,
+    size: parseFloat(getComputedStyle(element).fontSize),
+    rootSize: parseFloat(getComputedStyle(document.documentElement).fontSize),
+  }));
   await page.keyboard.press("Control+Comma");
-  const palette = page.locator(".palette");
-  await expect(palette).toBeVisible();
-  await expect(palette.locator(".palette-row")).toHaveCount(9);
+  const input = page.getByRole("textbox", {
+    name: "Command palette",
+    exact: true,
+  });
+  await input.fill("UI font");
+  await input.press("Enter");
+  await expect(search).not.toHaveCSS("font-family", initial.font);
 
-  const plotFont = palette
-    .locator(".palette-row", { hasText: "Plot font" })
-    .first();
-  await expect(plotFont.locator(".palette-hint")).toHaveText("JetBrains Mono");
+  await input.fill("UI font size");
+  await input.press("ArrowRight");
+  await input.press("+");
+  await input.press("-");
+  await expect(page.locator(":root")).toHaveCSS(
+    "font-size",
+    `${String(initial.rootSize + 1)}px`,
+  );
+  await expect
+    .poll(() =>
+      search.evaluate((element) =>
+        parseFloat(getComputedStyle(element).fontSize),
+      ),
+    )
+    .toBeCloseTo((initial.size * (initial.rootSize + 1)) / initial.rootSize, 2);
 
-  const uiSize = palette.locator(".palette-row", { hasText: "UI font size" });
-  await expect(uiSize.locator(".palette-hint")).toHaveText("13px");
-  await page.locator(".palette-input").press("ArrowDown");
-  await page.locator(".palette-input").press("ArrowDown");
-  await page.locator(".palette-input").press("ArrowDown");
-  await page.locator(".palette-input").press("ArrowDown");
-  await page.locator(".palette-input").press("ArrowDown");
-  await page.locator(".palette-input").press("ArrowRight");
-  await expect(uiSize.locator(".palette-hint")).toHaveText("14px");
-  await page.locator(".palette-input").press("+");
-  await expect(uiSize.locator(".palette-hint")).toHaveText("15px");
-  await page.locator(".palette-input").press("-");
-  await expect(uiSize.locator(".palette-hint")).toHaveText("14px");
-  await expect(page.locator(":root")).toHaveCSS("font-size", "14px");
-
-  const lineWidth = palette.locator(".palette-row", {
+  await input.fill("Plot line width");
+  const lineWidth = page.locator(".palette-row", {
     hasText: "Plot line width",
   });
-  await expect(lineWidth.locator(".palette-hint")).toHaveText("100%");
-  await page.locator(".palette-input").press("ArrowDown");
-  await page.locator(".palette-input").press("ArrowDown");
-  await page.locator(".palette-input").press("ArrowRight");
-  await expect(lineWidth.locator(".palette-hint")).toHaveText("125%");
-
-  await page.keyboard.press("Escape");
+  const originalWidth = await lineWidth.locator(".palette-hint").textContent();
+  await input.press("ArrowRight");
+  await expect(lineWidth.locator(".palette-hint")).not.toHaveText(
+    originalWidth ?? "",
+  );
+  await input.press("Escape");
 
   await page.keyboard.press("Control+Shift+P");
-  await page.locator(".palette-input").fill("Plot line width: reset");
-  await page.locator(".palette-input").press("Enter");
+  await input.fill("Plot line width: reset");
+  await input.press("Enter");
   await page.keyboard.press("Control+Comma");
-  await expect(lineWidth.locator(".palette-hint")).toHaveText("100%");
+  await input.fill("Plot line width");
+  await expect(lineWidth.locator(".palette-hint")).toHaveText(
+    originalWidth ?? "",
+  );
 });
 
 test("undo restores chrome and preserves panel focus", async ({ page }) => {

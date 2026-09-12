@@ -28,7 +28,8 @@ export class SignalOutlineView {
   private rows: OutlineRow[] = [];
   private activeIndex = 0;
   private liveValues: ReadonlyMap<string, string> = new Map();
-  private readonly rowHeight: number;
+  private rowHeight = FALLBACK_ROW_HEIGHT;
+  private readonly appearanceObserver: MutationObserver;
   private readonly unsubscribe: () => void;
   private readonly onScroll = (): void => this.render();
   private readonly onKeyDown = (event: KeyboardEvent): void =>
@@ -39,13 +40,11 @@ export class SignalOutlineView {
     private readonly selection: SelectionModel,
     private readonly callbacks: SignalOutlineCallbacks,
   ) {
-    const tokenHeight = Number.parseFloat(
-      getComputedStyle(listElement).getPropertyValue("--tree-row-height"),
-    );
-    this.rowHeight =
-      Number.isFinite(tokenHeight) && tokenHeight > 0
-        ? tokenHeight
-        : FALLBACK_ROW_HEIGHT;
+    this.appearanceObserver = new MutationObserver(() => this.render());
+    this.appearanceObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["style"],
+    });
     listElement.classList.add("outline-scroll");
     listElement.tabIndex = 0;
     listElement.dataset.cols = "channel,value";
@@ -88,6 +87,7 @@ export class SignalOutlineView {
   }
 
   destroy(): void {
+    this.appearanceObserver.disconnect();
     this.listElement.removeEventListener("scroll", this.onScroll);
     this.listElement.removeEventListener("keydown", this.onKeyDown);
     this.unsubscribe();
@@ -106,6 +106,13 @@ export class SignalOutlineView {
   }
 
   private render(): void {
+    const tokenHeight = Number.parseFloat(
+      getComputedStyle(this.listElement).getPropertyValue("--tree-row-height"),
+    );
+    this.rowHeight =
+      Number.isFinite(tokenHeight) && tokenHeight > 0
+        ? tokenHeight
+        : FALLBACK_ROW_HEIGHT;
     const active = document.activeElement;
     const focusedKey =
       active instanceof HTMLElement && this.listElement.contains(active)
@@ -182,6 +189,7 @@ export class SignalOutlineView {
     element.dataset.rowKind = row.kind;
     element.setAttribute("role", "row");
     element.style.gridTemplateColumns = "var(--outline-columns)";
+    element.style.height = `${String(this.rowHeight)}px`;
     return row.kind === "group"
       ? this.groupElement(element, row)
       : this.seriesElement(element, row);
@@ -320,6 +328,7 @@ export class SignalOutlineView {
     label.className = "signal-outline-label signal-path";
     label.style.paddingLeft = `${String(row.depth * 12)}px`;
     label.textContent = row.depth === 1 ? `· ${row.source}` : row.channel;
+    label.title = row.path;
     first.appendChild(label);
 
     if (derived) {

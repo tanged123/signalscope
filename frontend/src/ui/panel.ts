@@ -1,4 +1,8 @@
-import { lineToolbarMarkup } from "./line-toolbar";
+import { LineToolbar } from "./line-toolbar";
+import { legendBulkActions } from "./legend-bulk-actions";
+import { legendKeys } from "./legend-keys";
+import type { PanelSeriesAction } from "../app/panel-series-actions";
+import { applySeriesRowState, seriesStateLabel } from "./series-row-state";
 import { PanelAxes } from "./panel-axes";
 import { legendColorControls, legendColorTarget } from "./legend-color-scale";
 import type { AxisLimits } from "./axis-limits";
@@ -52,7 +56,6 @@ import {
 import { ChartHost, type ChartRenderRequest } from "../render/chart-host";
 import type { GpuContext } from "../render/gpu-context";
 import { seriesInspector, formatToolbarNumber } from "./series-inspector";
-import { showPanelMenu } from "./panel-menu";
 
 const CHART_HOST_INITIALIZATION_TIMEOUT_MS = 5_000;
 // A newly acquired device can outlive its first canvas configuration attempt.
@@ -135,6 +138,7 @@ export interface PanelCallbacks {
   onFocusAdd(id: string, entry: FocusEntry): void;
   onFocusRange(id: string, entries: readonly FocusEntry[]): void;
   onClearFocus(id: string): void;
+  onSeriesAction(id: string, action: PanelSeriesAction): void;
   onMuteSelector(id: string, selector: string): void;
   onMuteSeries(id: string, ref: SeriesRef): void;
   onRemoveBinding(id: string, index: number): void;
@@ -442,7 +446,7 @@ export class PanelView {
   private overrideDrawer = false;
   private statsColumnsDrawer = false;
   private bindingCleanup: (() => void) | null = null;
-  private panelConfigCleanup: (() => void) | null = null;
+  private readonly toolbar: LineToolbar;
   private plotLegendPosition: { x: number; y: number } | null = null;
   private plotLegendSize: { width: number; height: number } | null = null;
   private plotLegendAnchor: LegendAnchor | null = null;
@@ -473,7 +477,22 @@ export class PanelView {
         callbacks.onRenameTitle(panelId, title),
     });
     this.element = this.shell.element;
-    this.shell.slots.controls.innerHTML = lineToolbarMarkup();
+    this.toolbar = new LineToolbar(this.element, this.shell.slots.controls, {
+      toggleStats: () => callbacks.onToggleStats(this.id),
+      toggleAxes: () => callbacks.onToggleAxisStyle(this.id),
+      setWidth: (width) => callbacks.onSetPanelLineWidth(this.id, width),
+      toggleGhost: () => callbacks.onToggleGhostMode(this.id),
+      setGhostOpacity: (opacity) =>
+        callbacks.onSetGhostOpacity(this.id, opacity),
+      setLegend: (state) => callbacks.onLegendLayout(this.id, { state }),
+      setTips: (display) =>
+        callbacks.onSetAnnotationDisplay?.(this.id, display),
+      clearTips: () => {
+        this.annotationUi.selectedIds.clear();
+        callbacks.onClearAnnotations?.(this.id);
+      },
+      beforeOpen: () => this.axes.close(),
+    });
     this.chartHostElement = document.createElement("div");
     this.chartHostElement.className = "chart-host";
     this.chartHostElement.hidden = true;
@@ -499,7 +518,7 @@ export class PanelView {
       },
       addY: (paths) => callbacks.onDropSignals(this.id, paths),
       addYSet: (id) => callbacks.onDropSet(this.id, id),
-      beforeOpen: () => this.closePanelConfig(),
+      beforeOpen: () => this.toolbar.closeMenu(),
     });
     this.interactions = new PlotInteractionController(this.overlay, {
       layout: () => this.activeLayout(),
@@ -663,52 +682,6 @@ export class PanelView {
   }
 
   private bind(): void {
-    required(this.element, ".panel-stats-toggle").addEventListener(
-      "click",
-      () => {
-        this.callbacks.onToggleStats(this.id);
-      },
-    );
-    required(this.element, ".panel-axis-toggle").addEventListener(
-      "click",
-      () => {
-        this.callbacks.onToggleAxisStyle(this.id);
-      },
-    );
-    required(this.element, ".panel-line-width").addEventListener(
-      "click",
-      (event) => {
-        if (this.lastState !== null)
-          this.openLineWidthMenu(
-            this.lastState,
-            event.currentTarget as HTMLElement,
-          );
-      },
-    );
-    required(this.element, ".panel-ghost-opacity").addEventListener(
-      "click",
-      (event) => {
-        if (this.lastState !== null)
-          this.openGhostMenu(
-            this.lastState,
-            event.currentTarget as HTMLElement,
-          );
-      },
-    );
-    required(this.element, ".panel-legend-state").addEventListener(
-      "click",
-      (event) => {
-        if (this.lastState !== null)
-          this.openLegendStateMenu(
-            this.lastState,
-            event.currentTarget as HTMLElement,
-          );
-      },
-    );
-    required(this.element, ".panel-tips").addEventListener("click", (event) => {
-      if (this.lastState !== null)
-        this.openTipsMenu(this.lastState, event.currentTarget as HTMLElement);
-    });
     this.element.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         if (this.annotationUi.selectedIds.size > 0) {
@@ -718,7 +691,7 @@ export class PanelView {
         } else if (this.emphasizePaths !== null) this.clearHover();
         else this.callbacks.onClearFocus(this.id);
         this.closeBindingPopover();
-        this.closePanelConfig();
+        this.toolbar.closeMenu();
         const drawerOpen =
           this.encodingDrawer !== null ||
           this.overrideDrawer ||
@@ -870,28 +843,8 @@ export class PanelView {
     this.lastInputState = state;
     this.lastState = rendered;
     this.shell.setTitle(rendered.title, maximized);
-    const axisToggle = required<HTMLButtonElement>(
-      this.element,
-      ".panel-axis-toggle",
-    );
-    axisToggle.textContent = `axes: ${rendered.axis_style}`;
-    axisToggle.title = `Switch to ${rendered.axis_style === "gutter" ? "inline" : "gutter"} axes`;
-    axisToggle.hidden = false;
     this.axes.update(state);
-    required<HTMLElement>(this.element, ".panel-line-width-value").textContent =
-      formatToolbarNumber(rendered.line_width);
-    required<HTMLElement>(this.element, ".panel-ghost-value").textContent =
-      rendered.ghost_mode === "all"
-        ? "none"
-        : `${String(Math.round(rendered.ghost_opacity * 100))}%`;
-    required<HTMLElement>(this.element, ".panel-legend-value").textContent =
-      rendered.legend_state;
-    required<HTMLElement>(this.element, ".panel-tips-value").textContent =
-      String(rendered.annotations.length);
-    required<HTMLButtonElement>(
-      this.element,
-      ".panel-stats-toggle",
-    ).setAttribute("aria-pressed", String(rendered.show_stats));
+    this.toolbar.update(rendered);
     this.updateBindings(rendered);
     this.pruneAnnotationUiState(rendered);
     this.updatePlotLegend(rendered);
@@ -1107,7 +1060,7 @@ export class PanelView {
   dispose(): void {
     this.disposed = true;
     this.axes.dispose();
-    this.closePanelConfig();
+    this.toolbar.dispose();
     this.releaseGpu();
     this.interactions.dispose();
     this.shell.dispose();
@@ -1536,7 +1489,7 @@ export class PanelView {
       const badge = document.createElement("div");
       badge.className = "plot-legend-badge";
       const ghosts = state.series.filter(
-        (series) => series.visible && series.display === "ghost",
+        (series) => series.visible && series.opacity < 1,
       ).length;
       const drag = document.createElement("button");
       drag.className = "plot-legend-drag plot-legend-badge-drag";
@@ -1555,7 +1508,7 @@ export class PanelView {
       );
       required<HTMLElement>(summary, "span:nth-of-type(2)").textContent =
         `${String(ghosts)} dimmed`;
-      summary.title = "Expand legend keys";
+      summary.title = "Show simple legend";
       summary.addEventListener("click", () => {
         this.callbacks.onLegendLayout(this.id, { state: "keys" });
       });
@@ -1577,13 +1530,16 @@ export class PanelView {
       undock.className = "plot-legend-undock";
       undock.type = "button";
       undock.textContent = "⇥";
-      undock.title = "Return legend to floating roster";
+      undock.title = "Float expanded legend";
       undock.addEventListener("click", () => this.floatPlotLegend(legend));
       header.append(title);
       if (state.show_stats) header.append(this.statsScopeLabel());
       header.append(undock);
       legend.replaceChildren(
         header,
+        legendBulkActions(state.series, (action) =>
+          this.callbacks.onSeriesAction(this.id, action),
+        ),
         legendColorControls(state, this.plotLegendEncodingRow(state), () =>
           this.axes.openColor(),
         ),
@@ -1619,7 +1575,9 @@ export class PanelView {
       state.legend_state === "roster" ? " series" : ""
     } ▾`;
     title.title =
-      state.legend_state === "roster" ? "Show compact keys" : "Show roster";
+      state.legend_state === "roster"
+        ? "Show simple legend"
+        : "Show expanded legend";
     title.addEventListener("click", () => {
       this.callbacks.onLegendLayout(this.id, {
         state: state.legend_state === "roster" ? "keys" : "roster",
@@ -1629,7 +1587,7 @@ export class PanelView {
     collapse.className = "plot-legend-collapse";
     collapse.type = "button";
     collapse.textContent = "⌄";
-    collapse.title = "Collapse legend to badge";
+    collapse.title = "Collapse legend";
     collapse.addEventListener("click", () => {
       this.callbacks.onLegendLayout(this.id, { state: "badge" });
     });
@@ -1647,10 +1605,17 @@ export class PanelView {
     const cornerResize = this.legendResizeHandle("corner", legend);
     legend.replaceChildren(
       header,
-      legendColorControls(state, this.plotLegendEncodingRow(state), () =>
-        this.axes.openColor(),
-      ),
-      ...this.plotLegendDrawers(state),
+      ...(state.legend_state === "roster" || state.show_stats
+        ? [
+            legendBulkActions(state.series, (action) =>
+              this.callbacks.onSeriesAction(this.id, action),
+            ),
+            legendColorControls(state, this.plotLegendEncodingRow(state), () =>
+              this.axes.openColor(),
+            ),
+            ...this.plotLegendDrawers(state),
+          ]
+        : []),
       content,
       rightResize,
       bottomResize,
@@ -1783,48 +1748,24 @@ export class PanelView {
   }
 
   private plotLegendKeys(state: RenderPanelState): HTMLElement {
-    const content = document.createElement("div");
-    content.className = "plot-legend-content plot-legend-keys";
-    const all = seriesLegendRows(this.callbacks.catalog(), state);
-    const shown = this.focusOnly ? all.filter((row) => row.focused) : all;
-    const title = this.plotLegendGroupTitle(
-      state,
-      shown.length,
-      all.filter((row) => row.focused).length,
+    const rows = seriesLegendRows(this.callbacks.catalog(), state);
+    return legendKeys(
+      rows,
+      (row) => seriesColor(row.series),
+      (event, item) => {
+        if (event.altKey) this.callbacks.onMuteSeries(this.id, item.series.ref);
+        else
+          this.selectFocusRows(
+            event,
+            "legend",
+            item.value,
+            rows,
+            (row) => row.value,
+            (row) => this.focusEntryForSeries(row.series),
+          );
+      },
+      (path) => this.setEmphasis(path),
     );
-    title.className = "plot-legend-section-title plot-legend-group-title";
-    const rows = document.createElement("div");
-    rows.className = "plot-legend-key-rows";
-    rows.hidden = !this.signalsExpanded;
-    rows.append(
-      ...shown.map((row) => this.plotLegendSeriesRow(state, row, shown)),
-    );
-    rows.addEventListener("click", (event) => {
-      if (event.target === rows) this.callbacks.onClearFocus(this.id);
-    });
-    const ghosts = state.series.filter(
-      (series) => series.visible && series.display === "ghost",
-    ).length;
-    const footer = this.plotLegendFooter(state, ghosts, () => {
-      this.callbacks.onLegendLayout(this.id, { state: "roster" });
-    });
-    content.append(title, rows, this.plotLegendTips(state), footer);
-    if (
-      state.focus.length === 0 &&
-      ghosts > 0 &&
-      !state.legend_hint_dismissed
-    ) {
-      const hint = document.createElement("button");
-      hint.className = "plot-legend-hint";
-      hint.type = "button";
-      hint.textContent = "hover a dimmed line to explore · click to focus  ×";
-      hint.title = "Dismiss hint";
-      hint.addEventListener("click", () => {
-        this.callbacks.onLegendLayout(this.id, { hintDismissed: true });
-      });
-      content.append(hint);
-    }
-    return content;
   }
 
   private plotLegendGroupTitle(
@@ -1871,11 +1812,7 @@ export class PanelView {
     block.className = "plot-legend-row-block plot-legend-series-block";
     const row = document.createElement("div");
     row.className = "plot-legend-roster-row";
-    row.classList.toggle("focused", item.focused);
-    row.classList.toggle(
-      "ghosted",
-      item.series.display === "ghost" && !item.focused,
-    );
+    applySeriesRowState(row, item.series);
     const series = item.series;
     row.dataset.paths = JSON.stringify([series.path]);
     const swatch = document.createElement("button");
@@ -1897,10 +1834,11 @@ export class PanelView {
     const action = document.createElement("button");
     action.type = "button";
     action.className = "plot-legend-roster-action";
+    action.setAttribute("aria-pressed", String(item.focused));
     const label = document.createElement("span");
     label.className = "plot-legend-label";
     label.textContent = `${series.overridden ? "▍ " : ""}${series.path}`;
-    action.append(label);
+    action.append(label, seriesStateLabel(series));
     action.addEventListener("mouseenter", () => this.setEmphasis(series.path));
     action.addEventListener("mouseleave", () => this.setEmphasis(null));
     action.addEventListener("click", (event) => {
@@ -1959,6 +1897,12 @@ export class PanelView {
         this.callbacks.onClearFocus(this.id);
     });
     const renderRows = (): void => {
+      const rowHeight =
+        Number.parseFloat(
+          getComputedStyle(this.element).getPropertyValue(
+            "--legend-row-height",
+          ),
+        ) || 26;
       const all = seriesLegendRows(
         this.callbacks.catalog(),
         state,
@@ -1984,14 +1928,14 @@ export class PanelView {
         shown.length,
         rows.scrollTop,
         rows.clientHeight || 168,
-        24,
+        rowHeight,
       );
       viewport.style.height = `${String(slice.totalHeight)}px`;
       viewport.replaceChildren(
         ...shown.slice(slice.start, slice.end).map((item, offset) => {
           const block = this.plotLegendSeriesRow(state, item, shown);
           block.classList.add("virtual");
-          block.style.top = `${String(slice.topPadding + offset * 24)}px`;
+          block.style.top = `${String(slice.topPadding + offset * rowHeight)}px`;
           return block;
         }),
       );
@@ -2025,7 +1969,7 @@ export class PanelView {
     rows.append(viewport);
     group.append(groupTitle, rows);
     const ghosts = state.series.filter(
-      (series) => series.visible && series.display === "ghost",
+      (series) => series.visible && series.opacity < 1,
     ).length;
     const footer = this.plotLegendFooter(state, ghosts, () => {
       search.value = "";
@@ -2482,6 +2426,11 @@ export class PanelView {
 
     const body = document.createElement("div");
     body.className = "plot-stat-body";
+    body.addEventListener("scroll", () => {
+      const offset = `translateX(${String(-body.scrollLeft)}px)`;
+      header.style.transform = offset;
+      aggregateRow.style.transform = offset;
+    });
     body.addEventListener("click", (event) => {
       if (event.target === body) this.callbacks.onClearFocus(this.id);
     });
@@ -2489,8 +2438,7 @@ export class PanelView {
       const element = document.createElement("div");
       element.className = "plot-stat-row";
       element.dataset.paths = JSON.stringify([row.series.path]);
-      element.classList.toggle("muted", !row.series.visible);
-      element.classList.toggle("focused", row.series.focused);
+      applySeriesRowState(element, row.series);
       element.classList.toggle("overridden", row.series.overridden);
       element.style.gridTemplateColumns = grid;
       const identity = document.createElement("span");
@@ -2517,6 +2465,8 @@ export class PanelView {
       const label = document.createElement("button");
       label.type = "button";
       label.className = "plot-stat-label";
+      label.setAttribute("aria-pressed", String(row.series.focused));
+      label.title = row.series.path;
       label.textContent = row.series.path;
       if (row.series.overridden) {
         const marker = document.createElement("span");
@@ -2545,7 +2495,7 @@ export class PanelView {
             }),
           );
       });
-      identity.append(swatch, label);
+      identity.append(swatch, label, seriesStateLabel(row.series));
       element.append(
         identity,
         statSpan(row.values, spanDomain, seriesColor(row.series)),
@@ -2565,7 +2515,7 @@ export class PanelView {
       }
     }
     const ghosts = state.series.filter(
-      (series) => series.visible && series.display === "ghost",
+      (series) => series.visible && series.opacity < 1,
     ).length;
     content.append(
       header,
@@ -2980,106 +2930,6 @@ export class PanelView {
   private closeBindingPopover(): void {
     this.bindingCleanup?.();
     this.bindingCleanup = null;
-  }
-
-  private openLineWidthMenu(
-    state: RenderPanelState,
-    anchor: HTMLElement,
-  ): void {
-    this.openPanelMenu(
-      anchor,
-      "LINE WIDTH · PANEL DEFAULT",
-      [1, 1.4, 1.5, 2, 3].map((width) => ({
-        label: `${formatToolbarNumber(width)} px`,
-        active: Math.abs(state.line_width - width) < 0.001,
-        run: () => this.callbacks.onSetPanelLineWidth(this.id, width),
-      })),
-    );
-  }
-
-  private openGhostMenu(state: RenderPanelState, anchor: HTMLElement): void {
-    this.openPanelMenu(anchor, "DIM OTHER SERIES", [
-      {
-        label: "none · show full color",
-        active: state.ghost_mode === "all",
-        run: () => {
-          if (state.ghost_mode !== "all")
-            this.callbacks.onToggleGhostMode(this.id);
-        },
-      },
-      ...[0.2, 0.35, 0.5].map((opacity) => ({
-        label: `to ${String(Math.round(opacity * 100))}% opacity`,
-        active:
-          state.ghost_mode === "ghost" &&
-          Math.abs(state.ghost_opacity - opacity) < 0.001,
-        run: () => {
-          this.callbacks.onSetGhostOpacity(this.id, opacity);
-          if (state.ghost_mode !== "ghost")
-            this.callbacks.onToggleGhostMode(this.id);
-        },
-      })),
-    ]);
-  }
-
-  private openLegendStateMenu(
-    state: RenderPanelState,
-    anchor: HTMLElement,
-  ): void {
-    this.openPanelMenu(
-      anchor,
-      "LEGEND TYPE",
-      (["badge", "keys", "roster", "rail"] as const).map((legendState) => ({
-        label: legendState,
-        active: state.legend_state === legendState,
-        run: () =>
-          this.callbacks.onLegendLayout(this.id, { state: legendState }),
-      })),
-    );
-  }
-
-  private openTipsMenu(state: RenderPanelState, anchor: HTMLElement): void {
-    this.openPanelMenu(anchor, `TIPS · ${String(state.annotations.length)}`, [
-      ...(["labels", "markers", "hidden"] as const).map((mode) => ({
-        label: mode === "markers" ? "markers only" : mode,
-        active: state.annotation_display === mode,
-        run: () => {
-          this.callbacks.onSetAnnotationDisplay?.(this.id, mode);
-        },
-      })),
-      {
-        label: "clear all",
-        active: false,
-        action: true,
-        run: () => {
-          this.annotationUi.selectedIds.clear();
-          this.callbacks.onClearAnnotations?.(this.id);
-        },
-      },
-    ]);
-  }
-
-  private openPanelMenu(
-    anchor: HTMLElement,
-    label: string,
-    options: readonly {
-      label: string;
-      active: boolean;
-      action?: boolean;
-      run: () => void;
-    }[],
-  ): void {
-    this.closePanelConfig();
-    this.panelConfigCleanup = showPanelMenu(
-      this.element,
-      anchor,
-      label,
-      options,
-    );
-  }
-
-  private closePanelConfig(): void {
-    this.panelConfigCleanup?.();
-    this.panelConfigCleanup = null;
   }
 
   openInspector(path: string): void {

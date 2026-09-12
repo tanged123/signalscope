@@ -6,7 +6,9 @@ test("legend rail follows the pointer without reverting between frames", async (
   await page.route("**/api/health", (route) => route.fulfill({ status: 503 }));
   await gotoApp(page);
   await page.locator(".panel").first().locator(".panel-legend-state").click();
-  await page.getByRole("menuitemradio", { name: "rail", exact: false }).click();
+  await page
+    .getByRole("menuitemradio", { name: "docked", exact: false })
+    .click();
   const panel = page.locator(".panel").first();
   const rail = panel.locator(".plot-series-legend");
   const seam = rail.locator(".plot-legend-resize-left");

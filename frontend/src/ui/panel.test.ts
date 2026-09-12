@@ -416,6 +416,9 @@ describe("panel series", () => {
       },
     ];
     state.ghost_mode = "ghost";
+    for (const series of state.series) {
+      if (series.display === "ghost") series.opacity = state.ghost_opacity;
+    }
     const onLegendLayout = vi.fn();
     const view = Object.create(PanelView.prototype) as unknown as {
       callbacks: Pick<
@@ -455,13 +458,16 @@ describe("panel series", () => {
     expect(
       view.element.querySelector(".plot-legend-roster-row")?.textContent,
     ).toContain("run_07");
-    expect(view.element.querySelector(".plot-legend-footer")?.textContent).toBe(
-      "1 dimmed ▾0 overrides ▾",
-    );
-    view.element
-      .querySelector<HTMLButtonElement>(".plot-legend-footer button")
-      ?.click();
-    expect(onLegendLayout).toHaveBeenCalledWith("panel", { state: "roster" });
+    expect(view.element.querySelector(".plot-legend-footer")).toBeNull();
+    expect(view.element.querySelector(".plot-legend-encoding")).toBeNull();
+    expect(
+      view.element.querySelectorAll(".plot-legend-line-sample"),
+    ).toHaveLength(2);
+    expect(
+      view.element.querySelectorAll(
+        '.plot-legend-simple-row[data-dimmed="true"]',
+      ),
+    ).toHaveLength(1);
   });
 
   it("persists resize and keyboard movement without a hide control", () => {
@@ -754,12 +760,12 @@ describe("panel series", () => {
     );
     if (rows === null || viewport === null || search === null)
       throw new Error("Roster is missing");
-    expect(viewport.style.height).toBe("2400px");
+    expect(viewport.style.height).toBe("2600px");
     const initialRows = viewport.children.length;
     Object.defineProperty(rows, "clientHeight", { value: 480 });
     view.refreshPlotLegendRoster();
     expect(viewport.children.length).toBeGreaterThan(initialRows);
-    rows.scrollTop = 2176;
+    rows.scrollTop = 2376;
     rows.dispatchEvent(new Event("scroll"));
     expect(viewport.lastElementChild?.textContent).toContain("run_100");
 

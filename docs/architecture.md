@@ -81,7 +81,7 @@ Shell markup, status publication, inline session-title editing, and Help live
 in `ui/shell-markup.ts`, `shell-status.ts`, `session-title.ts`, and `help-dialog.ts`.
 `ui/about-dialog.ts` presents release metadata from the frontend manifest.
 `ui/info-dialog.ts` owns Help/About focus, dismissal, and cleanup.
-`ui/line-toolbar.ts` groups inline per-panel appearance controls. See ADR 0058 for the
+`ui/line-toolbar.ts` owns compact plot, style, and readouts menus (ADR 0065). See ADR 0058 for the
 optional session-title contract and the limits of chart performance estimates.
 
 | Concern                                 | Current owner                                                   | Boundary to preserve                                                                                             |
@@ -327,8 +327,11 @@ Documentation/bug fixes do not require an unrelated repository-wide split.
 Browser tests enable Chromium’s headless GPU presentation and share the
 SwiftShader ANGLE Vulkan context with the compositor. A separate GL/software
 presentation path can lose WebGPU canvas devices even after initialization
-succeeds. CI stops after the first test exhausts its retries and uploads failed
-browser traces for diagnosis.
+succeeds. CI runs the complete browser suite and uploads failed traces so one
+run reports all regressions. Browser checks assert user actions, keyboard
+access, and meaningful layout invariants. Avoid inventories of descendant
+controls, menu positions, or exact CSS values in unrelated behavior tests;
+keep appearance checks focused on representative controls and relative scaling.
 
 Viewport updates change ChartHost's domains and layout immediately; the shared
 `GpuContext` frame loop draws the latest state once per animation frame.

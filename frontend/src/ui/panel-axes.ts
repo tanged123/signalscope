@@ -8,6 +8,7 @@ import { bindAxisDrop } from "./axis-drop";
 import { showAxisPicker, xAxisLabel } from "./axis-picker";
 import { required } from "./dom";
 import { showAxisLimits, type AxisLimits } from "./axis-limits";
+import { panelControlAnchor } from "./panel-menu";
 
 export interface PanelAxisActions {
   catalog(): Catalog;
@@ -67,7 +68,7 @@ export class PanelAxes {
         ? "none"
         : xAxisLabel(state.color_axis.source, this.actions.catalog());
     const c = required<HTMLButtonElement>(this.element, ".panel-c-axis");
-    c.textContent = `c: ${cLabel} ▾`;
+    c.textContent = `color: ${cLabel} ▾`;
     c.title = `Color axis: ${cLabel}`;
     c.setAttribute("aria-label", `Color axis: ${cLabel}`);
   }
@@ -92,7 +93,7 @@ export class PanelAxes {
     this.actions.beforeOpen();
     this.closeMenu = showAxisPicker(
       this.element,
-      required(this.element, `.panel-${axis}-axis`),
+      panelControlAnchor(required(this.element, `.panel-${axis}-axis`)),
       axis,
       axis === "c"
         ? (state.color_axis?.source ?? { kind: "time" })
@@ -121,17 +122,10 @@ export class PanelAxes {
     this.actions.beforeOpen();
     this.closeMenu = showAxisLimits(
       this.element,
-      required(this.element, ".panel-axis-limits"),
+      panelControlAnchor(required(this.element, ".panel-axis-limits")),
       this.state,
       this.actions.visibleRanges(),
       (values) => this.actions.limits(values),
     );
   }
-}
-
-export function axisControlsMarkup(): string {
-  return `<button class="panel-toolbar-control panel-y-axis" type="button" title="Add Y signals or bundles" aria-label="Add Y signals or bundles">y: + add ▾</button>
-    <button class="panel-toolbar-control panel-x-axis" type="button" title="Choose X axis">x: time ▾</button>
-    <button class="panel-toolbar-control panel-c-axis" type="button" title="Choose color axis">c: none ▾</button>
-    <button class="panel-toolbar-control panel-axis-limits" type="button" aria-label="Axis settings">axis ▾</button>`;
 }

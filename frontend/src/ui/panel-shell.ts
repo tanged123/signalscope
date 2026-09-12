@@ -136,6 +136,7 @@ export class PanelShell {
   setTitle(title: string, maximized: boolean): void {
     this.element.setAttribute("aria-label", `${title} panel`);
     requiredSlot(this.element, "title").textContent = title;
+    requiredSlot(this.element, "title").title = title;
     requiredSlot<HTMLButtonElement>(this.element, "maximize").title = maximized
       ? "Restore panel"
       : "Maximize panel";
@@ -280,7 +281,6 @@ function panelShellMarkup(): string {
         <span class="panel-title" data-panel-slot="title"></span>
         <span class="panel-bindings" data-panel-slot="bindings"></span>
       </span>
-      <span class="panel-toolbar-separator" aria-hidden="true"></span>
       <span class="panel-toolbar-slot" data-panel-slot="controls"></span>
       <span class="panel-actions" data-panel-slot="actions">
         <span class="panel-split-actions" aria-label="Split panel" role="group">

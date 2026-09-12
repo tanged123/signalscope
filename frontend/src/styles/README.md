@@ -10,7 +10,7 @@ actions, and mobile layouts are not part of this pass.
 
 - Panels remain contiguous with square shared seams. Independent controls and
   floating surfaces use 4px corners; connected controls round only their outer
-  edge. Panel geometry and virtual row heights are unchanged.
+  edge. Panel layout and docking remain unchanged.
 - Inter remains the default UI font. Titles use weight and contrast for
   hierarchy; secondary labels stay readable. Legend headings, encoding controls,
   and footers follow UI font preferences, while series rows and numeric readouts
@@ -27,6 +27,76 @@ actions, and mobile layouts are not part of this pass.
   neutral palettes with clearer secondary text. Both high-contrast themes retain
   strong seams and omit decorative shadows. Theme previews use the same tokens.
   Scientific palettes and explicit overrides remain independent of chrome.
+
+## Plot readability
+
+At the default 13px UI setting, supporting controls use 11px and signal names
+use 12px. Panel titles retain their stronger weight. Legend series use the plot
+font at the selected plot size, capped at the UI caption size: 9px by default,
+and at most 11px with the default UI size. UI and plot font preferences remain
+independent; increasing both can still enlarge the legend. Axis sizes are unchanged.
+
+The signal browser uses 26px rows at the default UI size and scales its virtual
+row geometry with font changes. Smaller UI sizes retain 22px compact rows.
+Legend roster/rail rows start at 26px and grow with plot text; the existing
+Simple legend retains a 24px minimum. Numeric columns use tabular numerals
+and grow with plot text. Long names truncate with full-path tooltips; encoding
+summaries and inspector controls wrap within narrow legends.
+Statistics use shared column widths and scroll their headers with the values.
+
+Simple legends show line samples and names, with selection and independent
+hidden/dimmed indicators. Search, bulk actions, encodings, inspectors, section
+headings, tips, and footers belong to Expanded and Docked legends. The separate
+statistics toggle still exposes its explicitly requested readout.
+The visible mode labels are Collapsed (count indicator), Simple (line key),
+Expanded (floating controls), and Docked (controls at a plot edge). Serialized
+values remain `badge`, `keys`, `roster`, and `rail` for compatibility.
+
+Expanded legends use compact bordered buttons in the UI font for
+Select all / Clear selection, Dim all / Undim all, and
+Hide all / Show all in a visible row above the encoding controls. These act on
+every assigned signal, including rows outside the current filter. Hiding and
+dimming preserve focus; selecting preserves visibility and explicit opacity.
+Undim all also disables the dim-non-focused rule. Each action is one undo step.
+The workspace publishes these changes once; `app/panel-series-actions.ts` owns
+the transitions using existing focus and override fields. `ui/legend-bulk-actions.ts`
+owns the buttons, and their keyboard focus survives refreshes. Session/snapshot
+schemas and the renderer resolution rules are unchanged.
+
+The panel header uses short plot, style, and readouts summaries. Plot contains
+assignment, X/color bindings, presentation, and limits. Style directly lists
+width and dimming choices; readouts directly lists modes, statistics, and tips.
+Current values remain in the closed buttons, with full tooltips. The header
+stays on one line; control and binding strips scroll at narrow widths. Existing
+pickers return focus to their visible trigger. See ADR 0065. The inventory is:
+
+| Control                           | Behavior                                                                |
+| --------------------------------- | ----------------------------------------------------------------------- |
+| Drag handle and title             | Rearrange panel; double-click title to rename                           |
+| Binding summaries                 | Inspect assigned signals/bundles and remove bindings                    |
+| Axes presentation                 | Switch gutter/inline axes                                               |
+| Y add                             | Assign signals or bundles                                               |
+| X summary                         | Choose linked time, signal, or bundle                                   |
+| Color summary                     | Choose/clear color axis (previously abbreviated `c:`)                   |
+| Limits                            | Existing ranges, scales, direction, and equal units (previously `axis`) |
+| Width                             | Panel line-width default; now labeled beside the line sample            |
+| Dim others                        | Existing opacity choice for non-focused traces                          |
+| Legend                            | Collapsed, Simple, Expanded, or Docked                                  |
+| Statistics                        | Toggle visible-region columns                                           |
+| Tips                              | Existing labels/markers/visibility and pin actions                      |
+| Right/down split, maximize, close | Existing panel lifecycle actions                                        |
+
+Focus remains the existing additive selection model, including range and
+Command/Ctrl toggles. Hidden traces show `hidden` with a hollow swatch; visible
+traces with reduced opacity show `dimmed`. Below 220px legend width, these labels
+use distinct hollow-circle and half-circle symbols with descriptive tooltips.
+Names retain readable contrast and never use strikethrough for dimming.
+Focus highlights compose with hidden state
+in keys, rosters, and statistics. Mute/restore and Option-click retain their
+existing behavior. The deliberately configured dim-non-focused rule still
+responds to focus; selecting a row does not change visibility or that rule.
+Workspace tabs, linked time, cursor mode, and draggable/dockable legends retain
+their existing controls and behavior.
 
 ## Stylesheet ownership
 
@@ -57,3 +127,6 @@ palette independence, and offline appearance round trips.
 The packaged Electron smoke test waits for application readiness and checks
 that the native window background follows the active `--surface-1` token after
 keyboard theme changes.
+
+The [before/after review](../../../docs/ui-refinement/README.md) records the
+dense workspace, font sizes, and capture command for this refinement.

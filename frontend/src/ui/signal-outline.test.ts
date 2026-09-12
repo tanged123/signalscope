@@ -50,6 +50,41 @@ function viewFor(
 }
 
 describe("SignalOutlineView", () => {
+  it("keeps virtual offsets aligned with font sizing and stops observing on destroy", async () => {
+    const { list, view } = viewFor(
+      Catalog.build(
+        Array.from({ length: 100 }, (_, index) =>
+          signal("run-01", `channel-${String(index)}`),
+        ),
+      ),
+    );
+    const previousStyle = document.documentElement.getAttribute("style");
+    list.style.setProperty("--tree-row-height", "36px");
+    document.documentElement.style.fontSize = "18px";
+    await Promise.resolve();
+    expect(
+      list.querySelector<HTMLElement>(".signal-outline-spacer")?.style.height,
+    ).toBe("3600px");
+    expect(
+      list.querySelector<HTMLElement>(".signal-outline-row")?.style.height,
+    ).toBe("36px");
+    list.scrollTop = 3000;
+    list.dispatchEvent(new Event("scroll"));
+    const offset = list.querySelector<HTMLElement>(".signal-outline-window")
+      ?.style.transform;
+    expect(offset).toBe("translateY(2700px)");
+    view.destroy();
+    list.style.setProperty("--tree-row-height", "22px");
+    document.documentElement.style.fontSize = "11px";
+    await Promise.resolve();
+    expect(
+      list.querySelector<HTMLElement>(".signal-outline-spacer")?.style.height,
+    ).toBe("3600px");
+    if (previousStyle === null)
+      document.documentElement.removeAttribute("style");
+    else document.documentElement.setAttribute("style", previousStyle);
+  });
+
   it("virtualizes flat channels and selects collapsed channel groups", () => {
     const flat = viewFor(
       Catalog.build(

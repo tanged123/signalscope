@@ -73,6 +73,7 @@ progress; amend earlier records with explicit links when their guidance changes.
 54. [Named workbench themes](0062-named-workbench-themes.md)
 55. [Logarithmic axis scales](0063-logarithmic-axis-scales.md)
 56. [Axis direction](0064-axis-direction.md)
+57. [Compact panel configuration menus](0065-panel-toolbar-groups.md)
 
 ## Superseded decisions
 

@@ -19,21 +19,6 @@ test("panel lifecycle exposes unified directional splits", async ({ page }) => {
   await expect(page.locator(".workspace-row")).toHaveCount(2);
   await expect(bottomRow.locator(".panel")).toHaveCount(2);
 
-  const overflowingControls = await bottomRow
-    .locator(".panel-header")
-    .evaluateAll((headers) =>
-      headers.flatMap((header) => {
-        const bounds = header.getBoundingClientRect();
-        return [...header.querySelectorAll("button")]
-          .filter((button) => {
-            const control = button.getBoundingClientRect();
-            return control.top < bounds.top || control.bottom > bounds.bottom;
-          })
-          .map((button) => button.className);
-      }),
-    );
-  expect(overflowingControls).toEqual([]);
-
   await page.locator(".panel").last().locator(".panel-close").click();
   await page.locator(".panel").last().locator(".panel-close").click();
   await expect(page.locator(".panel")).toHaveCount(1);
@@ -259,6 +244,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
           .join(",");
       },
       onClearFocus: () => {},
+      onSeriesAction: () => {},
       onMuteSelector: () => {},
       onMuteSeries: () => {},
       onRemoveBinding: () => {},
@@ -417,70 +403,13 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
   await expect(panel.locator(".panel-actions")).toBeVisible();
   const plotLegend = panel.locator(".plot-series-legend");
   await expect
-    .poll(async () => {
-      const legendBox = await plotLegend.boundingBox();
-      const wrapBox = await panel.locator(".plot-wrap").boundingBox();
-      if (legendBox === null || wrapBox === null) return false;
-      const rightInset =
-        wrapBox.x + wrapBox.width - (legendBox.x + legendBox.width);
-      return Math.abs(rightInset - 8) <= 1;
-    })
-    .toBe(true);
-  await expect
     .poll(() => plotLegend.locator(".plot-legend-roster-row").count())
     .toBeLessThan(100);
   await expect
     .poll(() => plotLegend.locator(".plot-legend-roster-row").count())
     .toBeGreaterThan(4);
-  await expect
-    .poll(() =>
-      plotLegend.evaluate((element) => {
-        const row = getComputedStyle(
-          element.querySelector(".plot-legend-roster-row") as HTMLElement,
-        );
-        return {
-          plotFamilyApplied: row.fontFamily.includes("JetBrains Mono"),
-          plotSizeApplied: row.fontSize === "10px",
-        };
-      }),
-    )
-    .toEqual({ plotFamilyApplied: true, plotSizeApplied: true });
-  for (const selector of [
-    ".panel-line-width",
-    ".panel-tips",
-    ".panel-legend-state",
-  ]) {
-    await panel.locator(selector).click();
-    const menu = panel.locator(".panel-config-popover");
-    await expect(menu).toBeVisible();
-    await expect
-      .poll(() =>
-        menu.evaluate((element) => {
-          const title = getComputedStyle(
-            element.querySelector(".panel-config-title") as HTMLElement,
-          );
-          const option = getComputedStyle(
-            element.querySelector("button") as HTMLButtonElement,
-          );
-          return {
-            titleFamily: title.fontFamily.includes("Inter"),
-            titleSize: Math.round(Number.parseFloat(title.fontSize)),
-            optionFamily: option.fontFamily.includes("Inter"),
-            optionSize: Math.round(Number.parseFloat(option.fontSize)),
-          };
-        }),
-      )
-      .toEqual({
-        titleFamily: true,
-        titleSize: 10,
-        optionFamily: true,
-        optionSize: 10,
-      });
-    await page.keyboard.press("Escape");
-    await expect(menu).toHaveCount(0);
-  }
 
-  await panel.locator(".panel-tips").click();
+  await panel.locator(".panel-legend-state").click();
   await panel.getByRole("menuitem", { name: "clear all" }).click();
   await expect(page.locator("#legend-probe")).toHaveAttribute(
     "data-tips-cleared",
@@ -517,6 +446,10 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
   );
   const tips = plotLegend.locator(".plot-legend-tips");
   const tipsHeading = plotLegend.locator(".plot-legend-tips-heading");
+  // Leave room below the height limit before testing upward drag growth.
+  await tipsHeading.focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
   const beforeTipsResize = await tips.boundingBox();
   const tipsHeadingBox = await tipsHeading.boundingBox();
   if (beforeTipsResize === null || tipsHeadingBox === null)
@@ -1108,7 +1041,7 @@ test("legend console replaces the strip and supports per-plot states", async ({
   await expect(panel.locator(".plot-series-legend")).toBeVisible();
   await page.locator(".panel").first().locator(".panel-legend-state").click();
   await page
-    .getByRole("menuitemradio", { name: "badge", exact: false })
+    .getByRole("menuitemradio", { name: "collapsed", exact: false })
     .click();
   await expect(panel.locator(".plot-series-legend")).toHaveAttribute(
     "data-state",

@@ -26,6 +26,11 @@ import { SESSION_SCHEMA_VERSION } from "../generated/session";
 import { DEFAULT_PANEL_LINE_WIDTH } from "./style-defaults";
 
 import { setXAxis, setColorAxis, removeAxisRef } from "./line-bindings";
+import {
+  applyPanelSeriesAction,
+  toggleSeriesVisibility,
+  type PanelSeriesAction,
+} from "./panel-series-actions";
 
 const MIN_FRACTION = 0.1;
 
@@ -433,8 +438,18 @@ export class WorkspaceModel {
   toggleSeriesVisible(panelId: string, ref: SeriesRef): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
-    const override = this.ensureSeriesOverride(panel, ref);
-    override.visible = !(override.visible ?? true);
+    toggleSeriesVisibility(panel, ref);
+    this.touch(true);
+  }
+
+  applySeriesAction(
+    panelId: string,
+    refs: readonly SeriesRef[],
+    action: PanelSeriesAction,
+  ): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined) return;
+    applyPanelSeriesAction(panel, refs, action);
     this.touch(true);
   }
 

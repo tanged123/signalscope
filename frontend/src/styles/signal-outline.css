@@ -90,6 +90,8 @@
 }
 
 .signal-outline-row[data-row-kind="series"] .signal-outline-label {
+  direction: rtl;
+  text-align: left;
   color: var(--fg-2);
 }
 

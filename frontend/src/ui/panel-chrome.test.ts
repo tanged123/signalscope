@@ -81,6 +81,7 @@ function callbacks(catalog: Catalog): PanelCallbacks {
     onFocusAdd: vi.fn(),
     onFocusRange: vi.fn(),
     onClearFocus: vi.fn(),
+    onSeriesAction: vi.fn(),
     onMuteSelector: vi.fn(),
     onMuteSeries: vi.fn(),
     onRemoveBinding: vi.fn(),
@@ -278,14 +279,14 @@ describe("PanelView chrome", () => {
       [...(legend?.querySelectorAll(".plot-legend-encoding-chip") ?? [])].map(
         (chip) => chip.textContent,
       ),
-    ).toEqual(["color ← source", "dash ← flat", "width ← flat · 1.4"]);
+    ).toEqual([]);
     expect(view.element.querySelector(".panel-config-toggle")).toBeNull();
     expect(view.element.querySelector(".panel-line-width")?.textContent).toBe(
-      "1.4 ▾",
+      "style: 1.4 ▾",
     );
     expect(
-      view.element.querySelector(".panel-ghost-opacity")?.textContent,
-    ).toBe("dim none ▾");
+      view.element.querySelector(".panel-line-width")?.getAttribute("title"),
+    ).toBe("Line width: 1.4px · dim others: none");
     expect(view.element.querySelector(".panel-focus-chip")).toBeNull();
     expect(view.element.querySelector(".panel-annotations")).toBeNull();
   });
@@ -509,6 +510,7 @@ describe("PanelView chrome", () => {
     ]);
     const view = new PanelView("panel", callbacks(catalog));
     const panel = state();
+    panel.legend_state = "roster";
     view.update(panel, false);
 
     view.element
@@ -520,26 +522,14 @@ describe("PanelView chrome", () => {
       )?.ariaExpanded,
     ).toBe("false");
     expect(
-      view.element.querySelector<HTMLElement>(".plot-legend-key-rows")?.hidden,
+      view.element.querySelector<HTMLElement>(".plot-legend-roster-rows")
+        ?.hidden,
     ).toBe(true);
     expect(
       view.element.querySelector<HTMLElement>(".plot-legend-tips")?.hidden,
     ).toBe(false);
-
-    view.element
-      .querySelector<HTMLButtonElement>(".plot-legend-signals-toggle")
-      ?.click();
-    panel.legend_state = "roster";
-    view.update(panel, false);
-    view.element
-      .querySelector<HTMLButtonElement>(".plot-legend-signals-toggle")
-      ?.click();
     expect(
       view.element.querySelector<HTMLElement>(".plot-legend-search-wrap")
-        ?.hidden,
-    ).toBe(true);
-    expect(
-      view.element.querySelector<HTMLElement>(".plot-legend-roster-rows")
         ?.hidden,
     ).toBe(true);
     expect(
@@ -547,48 +537,53 @@ describe("PanelView chrome", () => {
     ).toContain("collapsed");
   });
 
-  it("uses plain click to add focus, Ctrl-click to toggle, and Shift-click for ranges", () => {
-    const catalog = Catalog.build([
-      signal("run-01", "temp"),
-      signal("run-02", "temp"),
-      signal("run-03", "temp"),
-    ]);
-    const panelCallbacks = callbacks(catalog);
-    const onFocusAdd = vi.fn();
-    const onFocusToggle = vi.fn();
-    const onFocusRange = vi.fn();
-    panelCallbacks.onFocusAdd = onFocusAdd;
-    panelCallbacks.onFocusToggle = onFocusToggle;
-    panelCallbacks.onFocusRange = onFocusRange;
-    const view = new PanelView("panel", panelCallbacks);
-    view.update(state(), false);
-    const rows = view.element.querySelectorAll<HTMLButtonElement>(
-      ".plot-legend-roster-action",
-    );
+  it.each(["keys", "roster"] as const)(
+    "uses plain click to add focus, Ctrl-click to toggle, and Shift-click for ranges in %s",
+    (legendState) => {
+      const catalog = Catalog.build([
+        signal("run-01", "temp"),
+        signal("run-02", "temp"),
+        signal("run-03", "temp"),
+      ]);
+      const panelCallbacks = callbacks(catalog);
+      const onFocusAdd = vi.fn();
+      const onFocusToggle = vi.fn();
+      const onFocusRange = vi.fn();
+      panelCallbacks.onFocusAdd = onFocusAdd;
+      panelCallbacks.onFocusToggle = onFocusToggle;
+      panelCallbacks.onFocusRange = onFocusRange;
+      const view = new PanelView("panel", panelCallbacks);
+      view.update({ ...state(), legend_state: legendState }, false);
+      const rows = view.element.querySelectorAll<HTMLButtonElement>(
+        legendState === "keys"
+          ? ".plot-legend-simple-row"
+          : ".plot-legend-roster-action",
+      );
 
-    rows[0]?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    rows[2]?.dispatchEvent(
-      new MouseEvent("click", { bubbles: true, shiftKey: true }),
-    );
-    rows[1]?.dispatchEvent(
-      new MouseEvent("click", { bubbles: true, ctrlKey: true }),
-    );
+      rows[0]?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      rows[2]?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, shiftKey: true }),
+      );
+      rows[1]?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, ctrlKey: true }),
+      );
 
-    expect(onFocusAdd).toHaveBeenCalledTimes(1);
-    expect(onFocusRange).toHaveBeenCalledTimes(1);
-    expect(
-      (
-        onFocusRange.mock.calls[0]?.[1] as Array<{
-          ref: { source_key: string };
-        }>
-      ).map((entry) => entry.ref.source_key),
-    ).toEqual(["run-01", "run-02", "run-03"]);
-    expect(onFocusToggle).toHaveBeenCalledTimes(1);
-    expect(onFocusToggle.mock.calls[0]?.[1]).toMatchObject({
-      kind: "series",
-      ref: { source_key: "run-02", channel: "temp" },
-    });
-  });
+      expect(onFocusAdd).toHaveBeenCalledTimes(1);
+      expect(onFocusRange).toHaveBeenCalledTimes(1);
+      expect(
+        (
+          onFocusRange.mock.calls[0]?.[1] as Array<{
+            ref: { source_key: string };
+          }>
+        ).map((entry) => entry.ref.source_key),
+      ).toEqual(["run-01", "run-02", "run-03"]);
+      expect(onFocusToggle).toHaveBeenCalledTimes(1);
+      expect(onFocusToggle.mock.calls[0]?.[1]).toMatchObject({
+        kind: "series",
+        ref: { source_key: "run-02", channel: "temp" },
+      });
+    },
+  );
 
   it("keeps tip coordinates visible in a docked rail", () => {
     const catalog = Catalog.build([signal("run-01", "temp")]);
@@ -644,7 +639,9 @@ describe("PanelView chrome", () => {
     ];
     view.update(panel, false);
 
-    view.element.querySelector<HTMLButtonElement>(".panel-tips")?.click();
+    view.element
+      .querySelector<HTMLButtonElement>(".panel-legend-state")
+      ?.click();
     const clear = [
       ...view.element.querySelectorAll<HTMLButtonElement>(
         ".panel-config-popover button",
@@ -687,7 +684,7 @@ describe("PanelView chrome", () => {
     const onSetEncoding = vi.fn();
     panelCallbacks.onSetEncoding = onSetEncoding;
     const view = new PanelView("panel", panelCallbacks);
-    view.update(state(), false);
+    view.update({ ...state(), legend_state: "roster" }, false);
 
     const legend = view.element.querySelector<HTMLElement>(
       ".plot-series-legend",
@@ -727,6 +724,7 @@ describe("PanelView chrome", () => {
     const catalog = Catalog.build([signal("run-01", "temp")]);
     const view = new PanelView("panel", callbacks(catalog));
     const panel = state();
+    panel.legend_state = "roster";
     panel.focus = [
       {
         kind: "series",
@@ -754,6 +752,7 @@ describe("PanelView chrome", () => {
       sources.map((source) => signal(source, "temp")),
     );
     const panel = state();
+    panel.legend_state = "roster";
     panel.focus = sources.map((source) => ({
       kind: "series",
       ref: { source_key: source, channel: "temp" },
@@ -781,6 +780,7 @@ describe("PanelView chrome", () => {
       { ...signal("run-02", "temp"), unit: "°C" },
     ]);
     const panel = state();
+    panel.legend_state = "roster";
     panel.color_by = "attr";
     const view = new PanelView("panel", callbacks(catalog));
     view.update(panel, false);
@@ -802,6 +802,7 @@ describe("PanelView chrome", () => {
     const onPatchSeriesStyle = vi.fn();
     panelCallbacks.onPatchSeriesStyle = onPatchSeriesStyle;
     const panel = state();
+    panel.legend_state = "roster";
     panel.overrides = [
       {
         target_ref: { source_key: "run-01", channel: "temp" },
@@ -954,6 +955,7 @@ describe("PanelView chrome", () => {
   it("updates cursor statistic cells without rebuilding open drawers", () => {
     const catalog = Catalog.build([signal("run-01", "temp")]);
     const panel = state();
+    panel.legend_state = "roster";
     panel.show_stats = true;
     panel.stat_columns = ["cursor"];
     const view = new PanelView("panel", callbacks(catalog));
@@ -964,6 +966,7 @@ describe("PanelView chrome", () => {
       )
       ?.click();
     const drawer = view.element.querySelector(".plot-encoding-drawer");
+    expect(drawer).not.toBeNull();
     Object.assign(view, {
       lastTiles: {
         requestId: "cursor",

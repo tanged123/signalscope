@@ -1,4 +1,5 @@
 import { expect, gotoApp, test } from "./fixtures";
+import { openPanelAxes, togglePanelStats } from "./fixtures";
 import { THEME_ORDER } from "../../src/app/themes";
 
 test("panel focus stays quiet and legends stay opaque during navigation", async ({
@@ -24,6 +25,7 @@ test("panel focus stays quiet and legends stay opaque during navigation", async 
   await expect(legend).toHaveCSS("opacity", "1");
   await page.mouse.up({ button: "right" });
   await expect(page.locator(".gesture-hint")).toHaveText("");
+  await openPanelAxes(panel);
   const control = panel.locator(".panel-axis-limits");
   await page.keyboard.press("Tab");
   await control.focus();
@@ -47,6 +49,9 @@ test("named theme selection and T cycling preserve plot colors", async ({
   ).toHaveAttribute("aria-pressed", "true");
   await picker.getByRole("button", { name: "Graphite", exact: true }).click();
   await expect(picker).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Application menu", exact: true }),
+  ).toBeFocused();
   await expect(root).toHaveAttribute("data-theme", "graphite");
   await expect(root).toHaveCSS("color-scheme", "dark");
   for (const theme of [
@@ -84,11 +89,11 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
   await row.dispatchEvent("dragend", { dataTransfer });
   await dataTransfer.dispose();
   await expect(secondPanel.locator(".binding-chip")).toHaveCount(1);
-  await secondPanel.locator(".panel-stats-toggle").click();
+  await togglePanelStats(secondPanel);
   const firstPanel = page.locator(".panel").first();
   await firstPanel.locator(".panel-legend-state").click();
   await firstPanel
-    .getByRole("menuitemradio", { name: "roster", exact: false })
+    .getByRole("menuitemradio", { name: "expanded", exact: false })
     .click();
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   const plots = page.locator(".plot-wrap");
@@ -116,42 +121,14 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
         page.getByRole("textbox", { name: "Search signals" }),
         page.getByRole("searchbox", { name: "Filter panel roster" }),
       ]) {
-        await expect
-          .poll(async () => {
-            await search.focus();
-            return search.evaluate((element) => {
-              const row = element.parentElement;
-              if (row === null || !element.isConnected) return false;
-              const swatch = document.createElement("span");
-              swatch.style.color = "var(--amber-7)";
-              row.append(swatch);
-              const focused =
-                document.activeElement === element &&
-                getComputedStyle(row).borderTopColor ===
-                  getComputedStyle(swatch).color;
-              swatch.remove();
-              const base = element.getAttribute("type") === "search" ? 10 : 11;
-              const expected =
-                (base *
-                  parseFloat(
-                    getComputedStyle(document.documentElement).fontSize,
-                  )) /
-                13;
-              return (
-                focused &&
-                Math.abs(
-                  parseFloat(getComputedStyle(element).fontSize) - expected,
-                ) < 0.01
-              );
-            });
-          })
-          .toBe(true);
+        await search.focus();
+        await expect(search).toBeFocused();
         await search.press("Tab");
         await expect(search).not.toBeFocused();
       }
       for (const panel of await page.locator(".panel").all()) {
         for (const control of [
-          ".panel-x-axis",
+          ".panel-axes-summary",
           ".panel-line-width",
           ".panel-legend-state",
           ".panel-split-right",

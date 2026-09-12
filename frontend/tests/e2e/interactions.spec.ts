@@ -1,4 +1,5 @@
 import { expect, gotoApp, test } from "./fixtures";
+import { togglePanelStats } from "./fixtures";
 import type { Page } from "@playwright/test";
 
 interface AxisLabelProbe {
@@ -126,7 +127,7 @@ test.describe("desktop plot interactions", () => {
     await page.mouse.wheel(0, -240);
     await expect(readout).not.toHaveText(beforeWindow ?? "");
 
-    await panel.locator(".panel-stats-toggle").click();
+    await togglePanelStats(panel);
     const stats = panel.locator(".plot-legend-stats");
     await expect(stats).toBeVisible();
     await expect(stats).toContainText("μ");
@@ -181,6 +182,10 @@ test.describe("desktop plot interactions", () => {
     await page.keyboard.press("Enter");
     await expect(title).toHaveText("Body velocity");
 
+    await panel.getByRole("button", { name: "Readouts", exact: true }).click();
+    await panel
+      .getByRole("menuitemradio", { name: "expanded", exact: true })
+      .click();
     const colorEncoding = panel.locator(
       '.plot-legend-encoding-chip[data-property="color"]',
     );
@@ -192,7 +197,7 @@ test.describe("desktop plot interactions", () => {
     await expect(colorEncoding).toContainText("color ← channel");
     await expect(drawer).toBeHidden();
 
-    await panel.locator(".panel-stats-toggle").click();
+    await togglePanelStats(panel);
     const swatch = panel
       .locator(".plot-stat-body .plot-stat-row .plot-row-inspector-toggle")
       .first();
