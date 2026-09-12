@@ -62,6 +62,7 @@ export function showPanelMenu(
   };
   const onPointer = (event: PointerEvent): void => {
     if (event.target instanceof Node && popover.contains(event.target)) return;
+    if (event.target instanceof Node && anchor.contains(event.target)) return;
     close();
   };
   const search = document.createElement("input");

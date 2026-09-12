@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { required } from "./dom";
 import { describe, expect, it, vi } from "vitest";
 import type { SignalSummary } from "../generated/protocol";
 import { Catalog } from "../app/catalog";
@@ -54,6 +55,43 @@ function summary(path: string): SignalSummary {
 }
 
 describe("panel markup", () => {
+  it("preserves the chosen scatter type through PanelView's shell boundary", () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe(): void {}
+      },
+    );
+    const onSplitRight = vi.fn();
+    const onSplitLeft = vi.fn();
+    const panel = new PanelView("panel", {
+      onSplitRight,
+      onSplitLeft,
+    } as unknown as PanelCallbacks);
+    const open = () =>
+      required<HTMLButtonElement>(panel.element, ".panel-layout").click();
+    open();
+    required<HTMLButtonElement>(
+      panel.element,
+      '[data-type="scatter2d"]',
+    ).click();
+    expect(onSplitRight).toHaveBeenCalledExactlyOnceWith("panel", {
+      kind: "scatter2d",
+    });
+    open();
+    required<HTMLButtonElement>(
+      panel.element,
+      '[data-position="left"]',
+    ).click();
+    required<HTMLButtonElement>(
+      panel.element,
+      '[data-type="scatter2d"]',
+    ).click();
+    expect(onSplitLeft).toHaveBeenCalledExactlyOnceWith("panel", {
+      kind: "scatter2d",
+    });
+    vi.unstubAllGlobals();
+  });
   it("offers no mode selection", () => {
     vi.stubGlobal(
       "ResizeObserver",

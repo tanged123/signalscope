@@ -1,3 +1,4 @@
+import { addPanel } from "./fixtures";
 import { expect, gotoApp, test } from "./fixtures";
 import { openPanelAxes, togglePanelStats } from "./fixtures";
 import { THEME_ORDER } from "../../src/app/themes";
@@ -78,7 +79,7 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
 }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await gotoApp(page);
-  await page.locator(".panel-split-right").click();
+  await addPanel(page.locator(".panel"));
   const row = page
     .locator('.signal-outline-row[data-row-kind="series"]')
     .first();
@@ -131,8 +132,7 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
           ".panel-axes-summary",
           ".panel-line-width",
           ".panel-legend-state",
-          ".panel-split-right",
-          ".panel-close",
+          ".panel-layout",
         ])
           await expect(panel.locator(control)).toBeVisible();
         expect(

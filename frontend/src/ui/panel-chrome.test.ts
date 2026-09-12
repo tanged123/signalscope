@@ -1033,7 +1033,7 @@ describe("PanelView chrome", () => {
       emphasizePaths: new Set(["run-01/temp"]),
     });
     const button =
-      view.element.querySelector<HTMLButtonElement>(".panel-close");
+      view.element.querySelector<HTMLButtonElement>(".panel-layout");
     if (button === null) throw new Error("missing panel button");
     const tab = new KeyboardEvent("keydown", {
       key: "Tab",
