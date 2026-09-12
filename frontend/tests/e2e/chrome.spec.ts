@@ -250,7 +250,9 @@ test("UI fonts and sizes apply consistently to controls, muted text, and the sig
       /^Inter,/,
     );
   }
-  await expect(page.locator(".signal-search")).toHaveCSS("font-size", "12px");
+  await expect(
+    page.getByRole("textbox", { name: "Search signals", exact: true }),
+  ).toHaveCSS("font-size", "12px");
   await expect(page.locator(".tree-empty").first()).toHaveCSS(
     "font-size",
     "12px",
