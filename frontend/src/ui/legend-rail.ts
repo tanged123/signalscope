@@ -42,9 +42,30 @@ export function refreshLegendWithControlFocus(
           ),
         )
       : undefined;
+  const rowControl =
+    active !== null && root.contains(active)
+      ? [
+          "plot-legend-roster-action",
+          "plot-row-inspector-toggle",
+          "plot-legend-simple-row",
+        ].find((name) => active.classList.contains(name))
+      : undefined;
+  const paths =
+    rowControl === undefined
+      ? null
+      : active?.closest("[data-paths]")?.getAttribute("data-paths");
   render();
   if (control !== undefined)
     root.querySelector<HTMLButtonElement>(`.${control}`)?.focus();
+  else if (rowControl !== undefined && paths != null) {
+    const row = [...root.querySelectorAll<HTMLElement>("[data-paths]")].find(
+      (element) => element.getAttribute("data-paths") === paths,
+    );
+    const target = row?.classList.contains(rowControl)
+      ? row
+      : row?.querySelector<HTMLElement>(`.${rowControl}`);
+    target?.focus();
+  }
 }
 
 export function legendResizeHandle(

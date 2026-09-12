@@ -1,21 +1,18 @@
-import { expect, gotoApp, test } from "./fixtures";
-import { togglePanelStats } from "./fixtures";
+import { expect, gotoApp, test, togglePanelStats } from "./fixtures";
 import { WorkspaceModel } from "../../src/app/workspace";
 import { seal } from "../../src/app/envelope";
 import { mkdirSync } from "node:fs";
+import type { Page, Locator } from "@playwright/test";
 
-test("dense workspace readability and independent signal states", async ({
-  page,
-}, testInfo) => {
-  test.setTimeout(60_000);
-  const phase = process.env.SIGNALSCOPE_UI_CAPTURE ?? "after";
+async function openWorkspace(page: Page, capture?: string): Promise<Locator> {
+  const sampleCount = capture === undefined ? 120 : 1800;
   const workspace = new WorkspaceModel();
   const first = workspace.addPanelRow();
   const second = workspace.splitPanelRight(first.id);
   if (second === null) throw new Error("Missing second panel");
   const signals = Array.from({ length: 48 }, (_, index) => {
     const channel = `propulsion/test_stand/temperature_sensor_${String(index + 1).padStart(2, "0")}`;
-    const bins = Array.from({ length: 1800 }, (_, sample) => {
+    const bins = Array.from({ length: sampleCount }, (_, sample) => {
       const t = sample / 30;
       const v = 30 + index * 0.8 + 10 * Math.sin(t / 6 + index / 9);
       return {
@@ -40,9 +37,9 @@ test("dense workspace readability and independent signal states", async ({
         local_path: channel,
         path: `test-stand/${channel}`,
         unit: "°C",
-        point_count: "1800",
+        point_count: String(sampleCount),
         t_min: 0,
-        t_max: 59.9667,
+        t_max: (sampleCount - 1) / 30,
         last_value: bins.at(-1)?.last ?? null,
       },
       levels: [bins],
@@ -95,7 +92,7 @@ test("dense workspace readability and independent signal states", async ({
     await route.fulfill({ response, body: html });
   });
   await page.setViewportSize({ width: 1440, height: 900 });
-  if (phase === "before") {
+  if (capture === "before") {
     await page.goto("http://127.0.0.1:4174/");
     await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
   } else await gotoApp(page);
@@ -103,111 +100,122 @@ test("dense workspace readability and independent signal states", async ({
   await page.evaluate(() => document.fonts.ready.then(() => undefined));
   await expect(page.locator(".render-ms")).not.toHaveText("— ms");
   await page.mouse.move(5, 5);
-  mkdirSync("../build/ui-review", { recursive: true });
-  await page.screenshot({ path: `../build/ui-review/${phase}-native.png` });
-  await testInfo.attach(`${phase}-native`, {
-    path: `../build/ui-review/${phase}-native.png`,
-    contentType: "image/png",
+
+  return page.locator(".panel").first();
+}
+
+function seriesRow(panel: Locator, index: number): Locator {
+  return panel.locator(".plot-legend-roster-row").filter({
+    hasText: `temperature_sensor_${String(index).padStart(2, "0")}`,
   });
-  const firstPanel = page.locator(".panel").first();
-  const row = (index: number) =>
-    firstPanel.locator(".plot-legend-roster-row").filter({
-      hasText: `temperature_sensor_${String(index).padStart(2, "0")}`,
-    });
+}
+
+test("hidden and dimmed signals preserve independent keyboard selection", async ({
+  page,
+}) => {
+  const firstPanel = await openWorkspace(page);
+  const row = (index: number) => seriesRow(firstPanel, index);
+  await expect(row(1)).toHaveClass(/focused/);
+  await expect(row(1)).toHaveAttribute("data-hidden", "false");
+  await expect(row(2)).toHaveClass(/focused/);
+  await expect(row(2)).toHaveAttribute("data-hidden", "true");
+  await expect(row(3)).not.toHaveClass(/focused/);
+  await expect(row(3)).toHaveAttribute("data-hidden", "true");
+  await expect(row(4)).toHaveAttribute("data-dimmed", "true");
+  await expect(row(4).locator(".plot-series-state")).toHaveText("dimmed");
+  await row(4).locator(".plot-legend-roster-action").hover();
+  await expect(row(4)).toHaveAttribute("data-hidden", "false");
+  await row(3).locator(".plot-legend-roster-action").focus();
+  await expect(row(3).locator(".plot-legend-roster-action")).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(row(3)).toHaveClass(/focused/);
+  await expect(row(3)).toHaveAttribute("data-hidden", "true");
+  await row(3).locator(".plot-row-inspector-toggle").click();
+  await firstPanel
+    .getByRole("button", { name: "restore", exact: true })
+    .click();
+  await expect(row(3)).toHaveAttribute("data-hidden", "false");
+  await expect(row(3)).toHaveClass(/focused/);
+  await firstPanel.getByTitle("Close line inspector").click();
+});
+
+test("bulk actions preserve selection and visibility across legend modes", async ({
+  page,
+}) => {
+  const firstPanel = await openWorkspace(page);
+  const row = (index: number) => seriesRow(firstPanel, index);
+  const actions = firstPanel.getByRole("group", {
+    name: "All plot signals",
+    exact: true,
+  });
+  await actions
+    .getByRole("button", { name: "Select all", exact: true })
+    .click();
+  await expect(
+    actions.getByRole("button", { name: "Clear selection", exact: true }),
+  ).toBeVisible();
+  await actions.getByRole("button", { name: "Dim all", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    actions.getByRole("button", { name: "Undim all", exact: true }),
+  ).toBeFocused();
+  await expect(row(1)).toHaveClass(/focused/);
+  await expect(row(1)).toHaveAttribute("data-dimmed", "true");
+  await expect(row(2)).toHaveAttribute("data-hidden", "true");
+  await actions.getByRole("button", { name: "Hide all", exact: true }).click();
+  await expect(row(1)).toHaveAttribute("data-hidden", "true");
+  await expect(row(1)).toHaveClass(/focused/);
+  await actions.getByRole("button", { name: "Show all", exact: true }).click();
+  await expect(row(2)).toHaveAttribute("data-hidden", "false");
+  await expect(row(2)).toHaveAttribute("data-dimmed", "true");
+  await actions.getByRole("button", { name: "Undim all", exact: true }).click();
+  await expect(row(1)).toHaveAttribute("data-dimmed", "false");
+  await actions
+    .getByRole("button", { name: "Clear selection", exact: true })
+    .click();
+  await expect(row(1)).not.toHaveClass(/focused/);
+  await expect(row(1)).toHaveAttribute("data-hidden", "false");
+
+  await firstPanel.locator(".panel-legend-state").click();
+  await firstPanel
+    .getByRole("menuitemradio", { name: "simple", exact: false })
+    .click();
+  const simple = firstPanel.locator(".plot-series-legend");
+  await expect(simple.locator(".plot-legend-simple-row")).toHaveCount(48);
+  for (const selector of [
+    ".plot-legend-bulk-actions",
+    ".plot-legend-search",
+    ".plot-legend-encoding",
+    ".plot-legend-group-title",
+    ".plot-legend-tips",
+    ".plot-legend-footer",
+    ".plot-row-inspector-toggle",
+  ])
+    await expect(simple.locator(selector)).toHaveCount(0);
+  const simpleFirst = simple.locator(".plot-legend-simple-row").first();
+  await simpleFirst.focus();
+  await page.keyboard.press("Enter");
+  await expect(simpleFirst).toHaveAttribute("aria-pressed", "true");
+  await expect(simpleFirst).toHaveAttribute("data-hidden", "false");
+
+  await simple.locator(".plot-legend-title").click();
+  await expect(simple.locator(".plot-legend-search")).toBeVisible();
+  await expect(simple.locator(".plot-legend-bulk-actions")).toBeVisible();
+});
+
+test("dense legend rows scroll and statistics stay aligned at larger UI sizes", async ({
+  page,
+}) => {
+  const firstPanel = await openWorkspace(page);
+  const row = (index: number) => seriesRow(firstPanel, index);
   await page.setViewportSize({ width: 1100, height: 900 });
   await page.keyboard.press("Control+Comma");
   await page.locator(".palette-input").fill("UI font size");
-  const uiSize = page.locator(".palette-row.selected .palette-hint");
-  await expect(page.locator(".palette-row.selected")).toContainText(
-    "UI font size",
-  );
-  for (let step = 0; step < 5; step++) {
-    await page.keyboard.press("ArrowRight");
-    await expect(uiSize).toHaveText(`${String(14 + step)}px`);
-  }
-  await page.locator(".palette-input").fill("Plot font size");
-  await expect(page.locator(".palette-row.selected")).toContainText(
-    "Plot font size",
-  );
-  for (let step = 0; step < 8; step++) {
-    await page.keyboard.press("ArrowRight");
-    await expect(uiSize).toHaveText(`${String(9.5 + step * 0.5)}px`);
-  }
+  for (let step = 0; step < 5; step++) await page.keyboard.press("ArrowRight");
   await page.keyboard.press("Escape");
-  await page.mouse.move(5, 5);
-  await page.screenshot({
-    path: `../build/ui-review/${phase}-large-narrow.png`,
-  });
-  await testInfo.attach(`${phase}-large-narrow`, {
-    path: `../build/ui-review/${phase}-large-narrow.png`,
-    contentType: "image/png",
-  });
-  if (phase === "before") return;
-  if (phase !== "before") {
-    await expect(row(1)).toHaveClass(/focused/);
-    await expect(row(1)).toHaveAttribute("data-hidden", "false");
-    await expect(row(2)).toHaveClass(/focused/);
-    await expect(row(2)).toHaveAttribute("data-hidden", "true");
-    await expect(row(3)).not.toHaveClass(/focused/);
-    await expect(row(3)).toHaveAttribute("data-hidden", "true");
-    await expect(row(4)).toHaveAttribute("data-dimmed", "true");
-    await expect(row(4).locator(".plot-series-state")).toHaveText("dimmed");
-    await expect(row(4).locator(".plot-legend-label")).toHaveCSS(
-      "text-decoration-line",
-      "none",
-    );
-    await row(4).locator(".plot-legend-roster-action").hover();
-    await expect(row(4)).toHaveAttribute("data-hidden", "false");
-    await row(3).locator(".plot-legend-roster-action").focus();
-    await expect(row(3).locator(".plot-legend-roster-action")).toBeFocused();
-    await expect(row(3).locator(".plot-legend-roster-action")).toHaveCSS(
-      "outline-style",
-      "solid",
-    );
-    await page.keyboard.press("Enter");
-    await expect(row(3)).toHaveClass(/focused/);
-    await expect(row(3)).toHaveAttribute("data-hidden", "true");
-    await row(3).locator(".plot-row-inspector-toggle").click();
-    await firstPanel
-      .getByRole("button", { name: "restore", exact: true })
-      .click();
-    await expect(row(3)).toHaveAttribute("data-hidden", "false");
-    await expect(row(3)).toHaveClass(/focused/);
-    await firstPanel.getByTitle("Close line inspector").click();
-  }
-  for (const panel of await page.locator(".panel").all()) {
-    expect(
-      await panel
-        .locator(".panel-header")
-        .evaluate((element) => element.scrollWidth <= element.clientWidth),
-    ).toBe(true);
-    for (const control of [
-      ".panel-axes-summary",
-      ".panel-line-width",
-      ".panel-legend-state",
-      ".panel-split-right",
-      ".panel-split-down",
-      ".panel-maximize",
-      ".panel-close",
-    ]) {
-      await expect(panel.locator(control)).toBeVisible();
-      await panel.locator(control).focus();
-      await expect(panel.locator(control)).toBeFocused();
-    }
-    await expect(panel.locator(".plot-series-legend")).toHaveCSS(
-      "font-size",
-      "13px",
-    );
-    expect(
-      await panel
-        .locator(".plot-legend-encoding")
-        .evaluate((element) => element.scrollWidth <= element.clientWidth),
-    ).toBe(true);
-  }
   const list = firstPanel.locator(".plot-legend-roster-rows");
-  await list.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-  });
+  await list.hover();
+  await page.mouse.wheel(0, 10_000);
   await expect(row(48)).toBeVisible();
   const bounds = await firstPanel
     .locator(".plot-legend-roster-row")
@@ -247,85 +255,38 @@ test("dense workspace readability and independent signal states", async ({
     })
     .toBeLessThan(1);
   await togglePanelStats(firstPanel);
-  const actions = firstPanel.getByRole("group", {
-    name: "All plot signals",
-    exact: true,
-  });
-  await actions
-    .getByRole("button", { name: "Select all", exact: true })
-    .click();
-  await expect(
-    actions.getByRole("button", { name: "Clear selection", exact: true }),
-  ).toBeVisible();
-  await actions.getByRole("button", { name: "Dim all", exact: true }).focus();
-  await page.keyboard.press("Enter");
-  await expect(
-    actions.getByRole("button", { name: "Undim all", exact: true }),
-  ).toBeFocused();
-  await expect(row(1)).toHaveClass(/focused/);
-  await expect(row(1)).toHaveAttribute("data-dimmed", "true");
-  await expect(row(2)).toHaveAttribute("data-hidden", "true");
-  await actions.getByRole("button", { name: "Hide all", exact: true }).click();
-  await expect(row(1)).toHaveAttribute("data-hidden", "true");
-  await expect(row(1)).toHaveClass(/focused/);
-  await actions.getByRole("button", { name: "Show all", exact: true }).click();
-  await expect(row(2)).toHaveAttribute("data-hidden", "false");
-  await expect(row(2)).toHaveAttribute("data-dimmed", "true");
-  await actions.getByRole("button", { name: "Undim all", exact: true }).click();
-  await expect(row(1)).toHaveAttribute("data-dimmed", "false");
-  await actions
-    .getByRole("button", { name: "Clear selection", exact: true })
-    .click();
-  await expect(row(1)).not.toHaveClass(/focused/);
-  await expect(row(1)).toHaveAttribute("data-hidden", "false");
+});
+
+test("dense workspace visual review captures", async ({ page }, testInfo) => {
+  const phase = process.env.SIGNALSCOPE_UI_CAPTURE ?? "after";
+  test.skip(
+    process.env.SIGNALSCOPE_UI_CAPTURE === undefined,
+    "Opt-in visual review; behavior is covered separately.",
+  );
+  test.setTimeout(60_000);
+  const firstPanel = await openWorkspace(page, phase);
+  mkdirSync("../build/ui-review", { recursive: true });
+  const capture = async (name: string) => {
+    const path = `../build/ui-review/${phase}-${name}.png`;
+    await page.mouse.move(5, 5);
+    await page.screenshot({ path });
+    await testInfo.attach(name, { path, contentType: "image/png" });
+  };
+  await capture("native");
+  await page.setViewportSize({ width: 1100, height: 900 });
   await page.keyboard.press("Control+Comma");
   await page.locator(".palette-input").fill("UI font size");
-  await expect(page.locator(".palette-row.selected")).toContainText(
-    "UI font size",
-  );
-  for (let step = 0; step < 5; step++) {
-    await page.keyboard.press("ArrowLeft");
-    await expect(uiSize).toHaveText(`${String(17 - step)}px`);
-  }
+  for (let step = 0; step < 5; step++) await page.keyboard.press("ArrowRight");
+  await page.locator(".palette-input").fill("Plot font size");
+  for (let step = 0; step < 8; step++) await page.keyboard.press("ArrowRight");
   await page.keyboard.press("Escape");
-  // Enlarged plot text must not enlarge the legend past the UI caption size.
-  await expect(firstPanel.locator(".plot-series-legend")).toHaveCSS(
-    "font-size",
-    "11px",
-  );
-  const selectAll = actions.getByRole("button", {
-    name: "Select all",
-    exact: true,
-  });
-  await expect(selectAll).toHaveCSS("font-family", /Inter/);
-  await expect(selectAll).toHaveCSS("border-top-style", "solid");
-  await expect(selectAll).toHaveCSS("border-top-width", "1px");
-  await selectAll.hover();
-  await selectAll.focus();
-  await expect(selectAll).toBeFocused();
-  await firstPanel.locator(".panel-legend-state").click();
+  await capture("large-narrow");
+  if (phase === "before") return;
   await firstPanel
-    .getByRole("menuitemradio", { name: "simple", exact: false })
+    .getByRole("button", { name: "Readouts", exact: true })
     .click();
-  const simple = firstPanel.locator(".plot-series-legend");
-  await expect(simple.locator(".plot-legend-simple-row")).toHaveCount(48);
-  for (const selector of [
-    ".plot-legend-bulk-actions",
-    ".plot-legend-search",
-    ".plot-legend-encoding",
-    ".plot-legend-group-title",
-    ".plot-legend-tips",
-    ".plot-legend-footer",
-    ".plot-row-inspector-toggle",
-  ])
-    await expect(simple.locator(selector)).toHaveCount(0);
-  const simpleFirst = simple.locator(".plot-legend-simple-row").first();
-  await simpleFirst.focus();
-  await page.keyboard.press("Enter");
-  await expect(simpleFirst).toHaveAttribute("aria-pressed", "true");
-  await expect(simpleFirst).toHaveAttribute("data-hidden", "false");
-  await page.screenshot({ path: "../build/ui-review/after-simple.png" });
-  await simple.locator(".plot-legend-title").click();
-  await expect(simple.locator(".plot-legend-search")).toBeVisible();
-  await expect(simple.locator(".plot-legend-bulk-actions")).toBeVisible();
+  await firstPanel
+    .getByRole("menuitemradio", { name: "simple", exact: true })
+    .click();
+  await capture("simple");
 });

@@ -10,6 +10,44 @@ import {
 
 afterEach(() => document.body.replaceChildren());
 
+it.each([
+  "plot-legend-roster-action",
+  "plot-row-inspector-toggle",
+  "plot-legend-simple-row",
+])(
+  "preserves %s focus by signal identity when data refresh reorders rows",
+  (control) => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const render = (paths: string[]) =>
+      root.replaceChildren(
+        ...paths.map((path) => {
+          const row = document.createElement(
+            control === "plot-legend-simple-row" ? "button" : "div",
+          );
+          row.dataset.paths = JSON.stringify([path]);
+          if (control === "plot-legend-simple-row") row.className = control;
+          else {
+            const button = document.createElement("button");
+            button.className = control;
+            row.append(button);
+          }
+          return row;
+        }),
+      );
+    render(["run/one", "run/two"]);
+    required<HTMLButtonElement>(root, "button").focus();
+    refreshLegendWithControlFocus(root, () => render(["run/two", "run/one"]));
+    expect(
+      document.activeElement
+        ?.closest("[data-paths]")
+        ?.getAttribute("data-paths"),
+    ).toBe(JSON.stringify(["run/one"]));
+    refreshLegendWithControlFocus(root, () => render(["run/two"]));
+    expect(root.contains(document.activeElement)).toBe(false);
+  },
+);
+
 it("keeps keyboard focus through rail collapse and expansion without triggering chart shortcuts", () => {
   const root = document.createElement("div");
   const wrap = document.createElement("div");

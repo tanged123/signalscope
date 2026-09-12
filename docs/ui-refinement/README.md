@@ -50,13 +50,18 @@ keys remain available, while font changes now resize legend text and keep the
 signal browser's virtual rows aligned. Statistics headers follow horizontal
 scrolling and share column widths with values.
 
-`frontend/tests/e2e/ui-refinement.spec.ts` creates the captured workspace and
-checks focus, hidden and dimmed states, keyboard selection and restore,
-enlarged typography, toolbar access, virtual scrolling, and statistics alignment.
-Run it with `./scripts/test.sh e2e ui-refinement.spec.ts --workers=1 --headed`.
+`frontend/tests/e2e/ui-refinement.spec.ts` runs independent checks for keyboard
+selection and restore, bulk actions and legend modes, and virtual scrolling
+with aligned statistics at larger UI sizes. Each starts from a fresh workspace
+with 48 signals and 120 samples per signal. Legend row focus follows signal
+identity when refreshed plot data replaces or reorders the DOM; removed rows
+do not transfer focus to another signal.
+
+Visual review uses the original 1,800 samples per signal and runs separately:
+`SIGNALSCOPE_UI_CAPTURE=after ./scripts/test.sh e2e ui-refinement.spec.ts -g 'visual review captures' --workers=1 --headed`.
 Captures are written to `build/ui-review/` and attached to the test results.
-To repeat the baseline capture, serve the base revision on port 4174 and set
-`SIGNALSCOPE_UI_CAPTURE=before` for the same test command.
+They do not run in ordinary CI. To repeat the baseline capture, serve the base
+revision on port 4174 and set `SIGNALSCOPE_UI_CAPTURE=before` in that command.
 
 ## Validation status
 
@@ -64,7 +69,7 @@ The compact-menu follow-up passed one focused browser check for menu access,
 direct style choices, picker focus restoration, and single-row headers with
 side-by-side panels at 1100px. The CI follow-up removes interpolated toolbar
 markup and makes tests select expanded legends before exercising editing
-controls. The frontend gate passed all 2,867 unit tests, lint, type checking,
+controls. The frontend gate passed all 2,870 unit tests, lint, type checking,
 schema checks, and snapshot validation; the quality gate also passed. Full
 browser validation is delegated to GitHub CI. Earlier dense-legend checks
 belong to the previous revision. Browser validation uses Chromium, not
@@ -74,3 +79,7 @@ The XY follow-up passed the complete focused browser test locally, including
 color-scale placement, axis settings, GPU rendering, export, and offline restore.
 Legend editing checks explicitly select expanded mode; simple mode keeps the
 color scale on the plot.
+
+The independent dense-workspace behavior checks passed three consecutive local
+runs (nine passes). Unit coverage exercises focus retention across reordered
+rows and removal of the focused signal.
