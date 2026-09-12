@@ -62,6 +62,10 @@ To repeat the baseline capture, serve the base revision on port 4174 and set
 
 The compact-menu follow-up passed one focused browser check for menu access,
 direct style choices, picker focus restoration, and single-row headers with
-side-by-side panels at 1100px. The e2e wrapper also typechecks and builds the
-frontend. Earlier dense-legend checks belong to the previous revision; no broad
-suite was rerun. Validation uses visible Chromium, not packaged Electron.
+side-by-side panels at 1100px. The CI follow-up removes interpolated toolbar
+markup and makes tests select expanded legends before exercising editing
+controls. The frontend gate passed all 2,867 unit tests, lint, type checking,
+schema checks, and snapshot validation; the quality gate also passed. Full
+browser validation is delegated to GitHub CI. Earlier dense-legend checks
+belong to the previous revision. Browser validation uses Chromium, not
+packaged Electron.

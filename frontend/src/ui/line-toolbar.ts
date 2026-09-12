@@ -1,4 +1,3 @@
-import { axisControlsMarkup } from "./panel-axes";
 import { required } from "./dom";
 import { formatToolbarNumber } from "./series-inspector";
 import {
@@ -47,7 +46,11 @@ export class LineToolbar {
       <summary class="panel-toolbar-control panel-axes-summary" aria-label="Plot settings">plot: <b class="panel-axes-value"></b> <span class="toolbar-caret">▾</span></summary>
       <div class="panel-axis-menu" role="group" aria-label="Plot settings">
         <button class="panel-action panel-axis-toggle" title="Switch axis presentation">axes: gutter</button>
-        ${axisControlsMarkup()}</div></details>
+        <button class="panel-toolbar-control panel-y-axis" type="button" title="Add Y signals or bundles" aria-label="Add Y signals or bundles">y: + add ▾</button>
+        <button class="panel-toolbar-control panel-x-axis" type="button" title="Choose X axis">x: time ▾</button>
+        <button class="panel-toolbar-control panel-c-axis" type="button" title="Choose color axis">color: none ▾</button>
+        <button class="panel-toolbar-control panel-axis-limits" type="button" title="Axis limits, scales, direction, and equal units" aria-label="Axis settings">limits ▾</button>
+      </div></details>
       <button class="panel-toolbar-control panel-line-width" type="button" aria-label="Style">style: <b class="panel-line-width-value"></b><span class="panel-ghost-value"></span> <span class="toolbar-caret">▾</span></button>
       <button class="panel-toolbar-control panel-legend-state" type="button" aria-label="Readouts">readouts: <b class="panel-legend-value"></b><span class="panel-readout-value"></span> <span class="toolbar-caret">▾</span></button>`;
     this.axes = required<HTMLDetailsElement>(slot, "details");

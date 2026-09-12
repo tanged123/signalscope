@@ -531,6 +531,10 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await page.locator(".axis-picker input").fill("none");
     await page.locator(".axis-picker input").press("Enter");
     await expect(page.locator(".colorbar-canvas")).toBeHidden();
+    await page.getByRole("button", { name: "Readouts", exact: true }).click();
+    await page
+      .getByRole("menuitemradio", { name: "expanded", exact: true })
+      .click();
     await expect(
       page.locator('.plot-legend-encoding-chip[data-property="color"]'),
     ).toContainText("color ← source");

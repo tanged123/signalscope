@@ -182,6 +182,10 @@ test.describe("desktop plot interactions", () => {
     await page.keyboard.press("Enter");
     await expect(title).toHaveText("Body velocity");
 
+    await panel.getByRole("button", { name: "Readouts", exact: true }).click();
+    await panel
+      .getByRole("menuitemradio", { name: "expanded", exact: true })
+      .click();
     const colorEncoding = panel.locator(
       '.plot-legend-encoding-chip[data-property="color"]',
     );

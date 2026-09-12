@@ -229,6 +229,11 @@ test("UI fonts and sizes apply consistently to controls, muted text, and the sig
   page,
 }) => {
   await gotoApp(page);
+  const panel = page.locator(".panel").first();
+  await panel.getByRole("button", { name: "Readouts", exact: true }).click();
+  await panel
+    .getByRole("menuitemradio", { name: "expanded", exact: true })
+    .click();
   const selectors = [
     ".workspace-name",
     ".signal-search",

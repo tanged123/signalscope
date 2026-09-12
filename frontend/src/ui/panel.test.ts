@@ -458,13 +458,16 @@ describe("panel series", () => {
     expect(
       view.element.querySelector(".plot-legend-roster-row")?.textContent,
     ).toContain("run_07");
-    expect(view.element.querySelector(".plot-legend-footer")?.textContent).toBe(
-      "1 dimmed ▾0 overrides ▾",
-    );
-    view.element
-      .querySelector<HTMLButtonElement>(".plot-legend-footer button")
-      ?.click();
-    expect(onLegendLayout).toHaveBeenCalledWith("panel", { state: "roster" });
+    expect(view.element.querySelector(".plot-legend-footer")).toBeNull();
+    expect(view.element.querySelector(".plot-legend-encoding")).toBeNull();
+    expect(
+      view.element.querySelectorAll(".plot-legend-line-sample"),
+    ).toHaveLength(2);
+    expect(
+      view.element.querySelectorAll(
+        '.plot-legend-simple-row[data-dimmed="true"]',
+      ),
+    ).toHaveLength(1);
   });
 
   it("persists resize and keyboard movement without a hide control", () => {
