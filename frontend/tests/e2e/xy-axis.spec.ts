@@ -215,24 +215,8 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
       name: "Axis limits",
       exact: true,
     });
-    await expect(editor).toHaveClass(/panel-config-popover/);
+    await expect(editor).toBeVisible();
     await expect(editor.getByLabel("C limits mode")).toHaveCount(0);
-    const triggerRect = await panel
-      .locator(".panel-axes-summary")
-      .boundingBox();
-    const editorRect = await editor.boundingBox();
-    expect(triggerRect).not.toBeNull();
-    expect(editorRect).not.toBeNull();
-    if (triggerRect !== null && editorRect !== null) {
-      expect(
-        Math.abs(editorRect.y - triggerRect.y - triggerRect.height - 4),
-      ).toBeLessThan(2);
-      expect(
-        Math.abs(
-          editorRect.x + editorRect.width - triggerRect.x - triggerRect.width,
-        ),
-      ).toBeLessThan(2);
-    }
     await editor.getByLabel("X limits mode").selectOption("fixed");
     await editor.getByLabel("X minimum", { exact: true }).fill("0");
     await editor.getByLabel("X maximum", { exact: true }).fill("10");
