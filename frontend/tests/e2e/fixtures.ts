@@ -15,6 +15,43 @@ export async function openPanelAxes(panel: Locator): Promise<void> {
     await panel.locator(".panel-axes-summary").click();
 }
 
+export async function panelLayoutAction(
+  panel: Locator,
+  name: string,
+): Promise<void> {
+  if (name === "Maximize panel")
+    await panel
+      .getByRole("button", { name: "Maximize plot", exact: true })
+      .click();
+  else if (name === "Restore panel")
+    await panel
+      .getByRole("button", { name: "Minimize plot", exact: true })
+      .click();
+  else {
+    await panel.locator(".panel-layout").click();
+    await panel
+      .getByRole("dialog", { name: "Add panel" })
+      .getByRole("button", { name, exact: true })
+      .click();
+  }
+}
+
+export async function addPanel(
+  panel: Locator,
+  type = "Time series",
+  position = "Right",
+): Promise<void> {
+  await panel.locator(".panel-layout").click();
+  await panel
+    .getByRole("dialog", { name: "Add panel" })
+    .getByRole("button", { name: new RegExp(position) })
+    .click();
+  await panel
+    .getByRole("dialog", { name: "Add panel" })
+    .getByRole("button", { name: new RegExp(`^${type}`) })
+    .click();
+}
+
 export async function togglePanelStats(panel: Locator): Promise<void> {
   await panel.locator(".panel-legend-state").click();
   await panel

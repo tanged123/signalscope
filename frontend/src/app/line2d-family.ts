@@ -21,6 +21,7 @@ interface FamilySeries {
 }
 
 interface FamilyContext {
+  primitive?: "line" | "points";
   xScale?: AxisScale | null;
   yScale?: AxisScale | null;
   series: readonly FamilySeries[];
@@ -112,6 +113,7 @@ function signalXFamily(
           xScale: context.xScale ?? "linear",
           yScale: context.yScale ?? "linear",
           linkedTime: data.response.timeX,
+          primitive: context.primitive,
           anchor: data.response.anchor,
           x: data.response.x.values,
           series: shown.map((column) => ({
@@ -128,8 +130,9 @@ function signalXFamily(
           })),
           window: context.window,
         }),
-        makeInput: (ranges, styles) =>
-          line2DFromSignalX(
+        makeInput: (ranges, styles) => ({
+          primitive: context.primitive ?? "line",
+          ...line2DFromSignalX(
             { ...data.response, ys: shown },
             {
               window: context.window,
@@ -165,6 +168,7 @@ function signalXFamily(
               yScale: context.yScale ?? "linear",
             },
           ),
+        }),
       };
     },
   };

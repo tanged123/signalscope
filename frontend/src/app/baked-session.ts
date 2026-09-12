@@ -279,6 +279,10 @@ function isPanel(value: unknown): boolean {
     typeof item === "string";
   return (
     isRecord(value) &&
+    isRecord(value.content) &&
+    Object.keys(value.content).length === 1 &&
+    (value.content.kind === "line2d" || value.content.kind === "scatter2d") &&
+    (value.content.kind !== "scatter2d" || value.color_axis == null) &&
     typeof value.id === "string" &&
     typeof value.title === "string" &&
     (value.axis_style === "gutter" || value.axis_style === "inline") &&

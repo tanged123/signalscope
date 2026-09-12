@@ -152,16 +152,22 @@ export class LineToolbar {
       required<HTMLElement>(this.host, ".panel-c-axis").title,
       "Signal assignment, limits, scales, direction, and equal units",
     ].join(" · ");
+    const scatter = state.content.kind === "scatter2d";
+    required<HTMLButtonElement>(this.host, ".panel-c-axis").hidden = scatter;
+    required(this.host, ".panel-axes-value").textContent =
+      `${scatter ? "scatter · " : ""}${state.axis_style}`;
     const width = formatToolbarNumber(state.line_width);
     const dim =
       state.ghost_mode === "all"
         ? "none"
         : `${String(Math.round(state.ghost_opacity * 100))}%`;
-    required(this.host, ".panel-line-width-value").textContent = width;
+    required(this.host, ".panel-line-width-value").textContent = scatter
+      ? formatToolbarNumber(state.line_width * 3)
+      : width;
     required(this.host, ".panel-ghost-value").textContent =
       dim === "none" ? "" : ` · ${dim}`;
     required<HTMLElement>(this.host, ".panel-line-width").title =
-      `Line width: ${width}px · dim others: ${dim}`;
+      `${scatter ? "Point size" : "Line width"}: ${scatter ? formatToolbarNumber(state.line_width * 3) : width}px · dim others: ${dim}`;
     required(this.host, ".panel-legend-value").textContent =
       LEGEND_LABELS[state.legend_state];
     required(this.host, ".panel-readout-value").textContent =
@@ -206,8 +212,9 @@ export class LineToolbar {
     if (state === null) return;
     this.open(anchor, "STYLE", [
       ...[1, 1.4, 1.5, 2, 3].map((width) => ({
-        section: "Line width",
-        label: `${formatToolbarNumber(width)} px`,
+        section:
+          state.content.kind === "scatter2d" ? "Point size" : "Line width",
+        label: `${formatToolbarNumber(width * (state.content.kind === "scatter2d" ? 3 : 1))} px`,
         active: Math.abs(state.line_width - width) < 0.001,
         run: () => this.actions.setWidth(width),
       })),

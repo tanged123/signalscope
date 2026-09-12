@@ -1,3 +1,4 @@
+import { usesPairedSamples } from "./panel-content";
 import { queryLineGroups } from "./line-query";
 import type { LineBindings } from "./line-bindings";
 import type { ColumnarTileResponse } from "./bin-columns";
@@ -132,7 +133,7 @@ export class LinePresentationController {
     for (const panel of this.callbacks.panels()) {
       const window = this.callbacks.windowFor(panel);
       const current = this.responsesByPanel.get(panel.id);
-      if (panel.x_axis.kind !== "time" || panel.color_axis != null) {
+      if (usesPairedSamples(panel)) {
         const response = this.signalXCache.coveringCurrent(panel.id, window);
         if (response === null) continue;
         prepareSignalXLine(response, window);
@@ -228,32 +229,29 @@ export class LinePresentationController {
         visibleSeries:
           input.signals.ids.length +
           (input.panel.color_axis != null ? 5 * input.signals.ids.length : 0) +
-          (input.panel.x_axis.kind !== "time" || input.panel.color_axis != null
+          (usesPairedSamples(input.panel)
             ? 2 * (input.signals.groups?.length ?? 1)
             : 0),
-        reductionExpansion:
-          input.panel.x_axis.kind !== "time" || input.panel.color_axis != null
-            ? 4 +
-              2 *
-                Math.max(
-                  0,
-                  ...(input.signals.groups?.map(
-                    (group) =>
-                      new Set([
-                        ...group.ids,
-                        ...Object.values(group.colorIds ?? {}),
-                      ]).size,
-                  ) ?? [input.signals.ids.length]),
-                )
-            : 1,
-        cpuBytesPerUnit:
-          input.panel.x_axis.kind !== "time" || input.panel.color_axis != null
-            ? CPU_BYTES_PER_LINE2D_VALUE
-            : CPU_BYTES_PER_BIN,
-        gpuBytesPerUnit:
-          input.panel.x_axis.kind !== "time" || input.panel.color_axis != null
-            ? GPU_BYTES_PER_LINE2D_VALUE
-            : GPU_BYTES_PER_BIN,
+        reductionExpansion: usesPairedSamples(input.panel)
+          ? 4 +
+            2 *
+              Math.max(
+                0,
+                ...(input.signals.groups?.map(
+                  (group) =>
+                    new Set([
+                      ...group.ids,
+                      ...Object.values(group.colorIds ?? {}),
+                    ]).size,
+                ) ?? [input.signals.ids.length]),
+              )
+          : 1,
+        cpuBytesPerUnit: usesPairedSamples(input.panel)
+          ? CPU_BYTES_PER_LINE2D_VALUE
+          : CPU_BYTES_PER_BIN,
+        gpuBytesPerUnit: usesPairedSamples(input.panel)
+          ? GPU_BYTES_PER_LINE2D_VALUE
+          : GPU_BYTES_PER_BIN,
       })),
       budgets,
       retainedCpuBytes:
@@ -283,8 +281,7 @@ export class LinePresentationController {
         const { panel, signals, window, paddedWindow, pixelWidth } = input;
         const { ids, missing } = signals;
         nextMissing.set(panel.id, missing);
-        const signalX =
-          panel.x_axis.kind !== "time" || panel.color_axis != null;
+        const signalX = usesPairedSamples(panel);
         if (ids.length === 0 || (signalX && signals.xId === null)) return;
         const desiredDevicePixels = Math.max(
           1,

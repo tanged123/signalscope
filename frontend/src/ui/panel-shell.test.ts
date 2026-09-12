@@ -1,18 +1,17 @@
+import { required } from "./dom";
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  MAXIMIZE_GLYPH,
-  PanelShell,
-  type PanelShellCallbacks,
-} from "./panel-shell";
+import { PanelShell, type PanelShellCallbacks } from "./panel-shell";
 
 function callbacks(): PanelShellCallbacks {
   return {
     onFocus: vi.fn(),
     onClose: vi.fn(),
     onSplitRight: vi.fn(),
+    onSplitLeft: vi.fn(),
+    onMinimize: vi.fn(),
     onSplitDown: vi.fn(),
     onMaximize: vi.fn(),
     onDropSignals: vi.fn(),
@@ -34,9 +33,10 @@ describe("PanelShell", () => {
     expect(shell.slots.status.className).toBe("panel-empty");
     expect(shell.element.querySelector(".panel-title")).not.toBeNull();
     expect(
-      shell.element.querySelector<HTMLButtonElement>(".panel-maximize")
-        ?.textContent,
-    ).toBe(MAXIMIZE_GLYPH);
+      shell.element
+        .querySelector(".panel-layout")
+        ?.getAttribute("aria-haspopup"),
+    ).toBe("dialog");
   });
 
   it("owns title, maximize state, status, and common action routing", () => {
@@ -49,9 +49,6 @@ describe("PanelShell", () => {
       "Signals",
     );
     expect(shell.element.classList.contains("maximized")).toBe(true);
-    expect(
-      shell.element.querySelector<HTMLButtonElement>(".panel-maximize")?.title,
-    ).toBe("Restore panel");
 
     shell.setStatus({ kind: "error", message: "bad data" });
     expect(shell.slots.status.hidden).toBe(false);
@@ -62,17 +59,37 @@ describe("PanelShell", () => {
     shell.setStatus({ kind: "ready" });
     expect(shell.slots.status.hidden).toBe(true);
 
-    shell.element.querySelector<HTMLButtonElement>(".panel-close")?.click();
+    const choose = (text: string) => {
+      required<HTMLButtonElement>(shell.element, ".panel-layout").click();
+      const button = [
+        ...shell.element.querySelectorAll<HTMLButtonElement>(
+          ".panel-creation-menu button",
+        ),
+      ].find((button) => button.textContent === text);
+      expect(button).toBeDefined();
+      button?.click();
+    };
+    choose("Close panel");
+    expect(shell.slots.actions.querySelectorAll("button")).toHaveLength(5);
+    const min = required<HTMLButtonElement>(shell.element, ".panel-minimize");
+    const max = required<HTMLButtonElement>(shell.element, ".panel-maximize");
+    expect(min.disabled).toBe(false);
+    expect(max.disabled).toBe(true);
+    min.click();
+    shell.setTitle("Signals", false);
+    expect(min.disabled).toBe(true);
+    expect(max.disabled).toBe(false);
+    max.click();
+    shell.element
+      .querySelector<HTMLButtonElement>(".panel-split-left")
+      ?.click();
     shell.element
       .querySelector<HTMLButtonElement>(".panel-split-right")
       ?.click();
-    shell.element
-      .querySelector<HTMLButtonElement>(".panel-split-down")
-      ?.click();
-    shell.element.querySelector<HTMLButtonElement>(".panel-maximize")?.click();
-    expect(panelCallbacks.onClose).toHaveBeenCalledWith("panel-1");
+    expect(panelCallbacks.onMinimize).toHaveBeenCalledWith("panel-1");
+    expect(panelCallbacks.onSplitLeft).toHaveBeenCalledWith("panel-1");
     expect(panelCallbacks.onSplitRight).toHaveBeenCalledWith("panel-1");
-    expect(panelCallbacks.onSplitDown).toHaveBeenCalledWith("panel-1");
+    expect(panelCallbacks.onClose).toHaveBeenCalledWith("panel-1");
     expect(panelCallbacks.onMaximize).toHaveBeenCalledWith("panel-1");
   });
 

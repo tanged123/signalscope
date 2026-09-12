@@ -1,3 +1,5 @@
+import type { PanelContent } from "../generated/session";
+import { showPanelLayoutMenu } from "./panel-layout-menu";
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const SET_DRAG_TYPE = "application/x-signalscope-set";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
@@ -22,8 +24,10 @@ export type PanelShellStatus =
 export interface PanelShellCallbacks {
   onFocus: (id: string) => void;
   onClose: (id: string) => void;
-  onSplitRight: (id: string) => void;
-  onSplitDown: (id: string) => void;
+  onSplitLeft?: (id: string, content?: PanelContent) => void;
+  onMinimize?: (id: string) => void;
+  onSplitRight: (id: string, content?: PanelContent) => void;
+  onSplitDown: (id: string, content?: PanelContent) => void;
   onMaximize: (id: string) => void;
   onDropSignals: (id: string, paths: string[]) => void;
   onDropSet: (id: string, setId: string) => void;
@@ -111,6 +115,8 @@ export class PanelShell {
   readonly element: HTMLElement;
   readonly slots: PanelShellSlots;
   private disposed = false;
+  private menuCleanup: (() => void) | null = null;
+  private title = "";
 
   constructor(
     private readonly id: string,
@@ -137,9 +143,11 @@ export class PanelShell {
     this.element.setAttribute("aria-label", `${title} panel`);
     requiredSlot(this.element, "title").textContent = title;
     requiredSlot(this.element, "title").title = title;
-    requiredSlot<HTMLButtonElement>(this.element, "maximize").title = maximized
-      ? "Restore panel"
-      : "Maximize panel";
+    this.title = title;
+    requiredSlot<HTMLButtonElement>(this.element, "minimize").disabled =
+      !maximized;
+    requiredSlot<HTMLButtonElement>(this.element, "maximize").disabled =
+      maximized;
     this.element.classList.toggle("maximized", maximized);
   }
 
@@ -161,6 +169,8 @@ export class PanelShell {
   }
 
   dispose(): void {
+    this.menuCleanup?.();
+    this.menuCleanup = null;
     this.disposed = true;
   }
 
@@ -171,22 +181,40 @@ export class PanelShell {
     this.slots.legend.addEventListener("pointerdown", (event) => {
       event.stopPropagation();
     });
-    requiredSlot<HTMLButtonElement>(this.element, "close").addEventListener(
-      "click",
-      () => this.callbacks.onClose(this.id),
+    for (const [slot, run] of [
+      ["split-left", () => this.callbacks.onSplitLeft?.(this.id)],
+      ["split-right", () => this.callbacks.onSplitRight(this.id)],
+      ["minimize", () => this.callbacks.onMinimize?.(this.id)],
+      ["maximize", () => this.callbacks.onMaximize(this.id)],
+    ] as const)
+      requiredSlot<HTMLButtonElement>(this.element, slot).addEventListener(
+        "click",
+        () => {
+          if (this.disposed) return;
+          this.menuCleanup?.();
+          run();
+        },
+      );
+    this.slots.actions.addEventListener("dragstart", (event) =>
+      event.preventDefault(),
     );
-    requiredSlot<HTMLButtonElement>(
-      this.element,
-      "split-right",
-    ).addEventListener("click", () => this.callbacks.onSplitRight(this.id));
-    requiredSlot<HTMLButtonElement>(
-      this.element,
-      "split-down",
-    ).addEventListener("click", () => this.callbacks.onSplitDown(this.id));
-    requiredSlot<HTMLButtonElement>(this.element, "maximize").addEventListener(
-      "click",
-      () => this.callbacks.onMaximize(this.id),
-    );
+    const layout = requiredSlot<HTMLButtonElement>(this.element, "layout");
+    layout.addEventListener("dragstart", (event) => event.preventDefault());
+    layout.addEventListener("click", () => {
+      if (this.disposed) return;
+      const wasOpen = layout.getAttribute("aria-expanded") === "true";
+      this.menuCleanup?.();
+      this.menuCleanup = null;
+      if (wasOpen) return;
+      this.menuCleanup = showPanelLayoutMenu(this.element, layout, this.title, {
+        create: (position, content) => {
+          if (position === "right")
+            this.callbacks.onSplitRight(this.id, content);
+          else this.callbacks.onSplitLeft?.(this.id, content);
+        },
+        close: () => this.callbacks.onClose(this.id),
+      });
+    });
 
     const header = requiredSlot(this.element, "header");
     const title = requiredSlot(this.element, "title");
@@ -283,12 +311,11 @@ function panelShellMarkup(): string {
       </span>
       <span class="panel-toolbar-slot" data-panel-slot="controls"></span>
       <span class="panel-actions" data-panel-slot="actions">
-        <span class="panel-split-actions" aria-label="Split panel" role="group">
-          <button class="panel-action panel-split-right" data-panel-slot="split-right" aria-label="Split panel right" title="Split panel right — new panel">→</button>
-          <button class="panel-action panel-split-down" data-panel-slot="split-down" aria-label="Split panel down" title="Split panel down — new panel">↓</button>
-        </span>
-        <button class="panel-action panel-maximize" data-panel-slot="maximize" title="Maximize panel">${MAXIMIZE_GLYPH}</button>
-        <button class="panel-action panel-close" data-panel-slot="close" title="Close panel">✕</button>
+        <button class="panel-action panel-split-left" data-panel-slot="split-left" type="button" aria-label="Add plot left" title="Add plot left">←</button>
+        <button class="panel-action panel-split-right" data-panel-slot="split-right" type="button" aria-label="Add plot right" title="Add plot right">→</button>
+        <button class="panel-action panel-minimize" data-panel-slot="minimize" type="button" aria-label="Minimize plot" title="Minimize plot — restore grid" disabled>↙</button>
+        <button class="panel-action panel-maximize" data-panel-slot="maximize" type="button" aria-label="Maximize plot" title="Maximize plot">↗</button>
+        <button class="panel-action panel-layout" data-panel-slot="layout" type="button" aria-label="Panel layout" aria-haspopup="dialog" aria-expanded="false" title="Add panel type">▾</button>
       </span>
     </header>
     <div class="plot-wrap" data-panel-slot="content">

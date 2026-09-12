@@ -1,3 +1,4 @@
+import { addPanel, panelLayoutAction } from "./fixtures";
 import { expect, gotoApp, test } from "./fixtures";
 import type { PanelView as PanelViewClass } from "../../src/ui/panel";
 import type { FormulaBar as FormulaBarClass } from "../../src/ui/formula-bar";
@@ -14,13 +15,13 @@ test("panel lifecycle exposes unified directional splits", async ({ page }) => {
   await expect(page.locator(".panel.focused")).toHaveCount(0);
 
   const bottomRow = page.locator(".workspace-row").last();
-  await bottomRow.locator(".panel-split-right").click();
+  await addPanel(bottomRow);
   await expect(page.locator(".panel")).toHaveCount(3);
   await expect(page.locator(".workspace-row")).toHaveCount(2);
   await expect(bottomRow.locator(".panel")).toHaveCount(2);
 
-  await page.locator(".panel").last().locator(".panel-close").click();
-  await page.locator(".panel").last().locator(".panel-close").click();
+  await panelLayoutAction(page.locator(".panel").last(), "Close panel");
+  await panelLayoutAction(page.locator(".panel").last(), "Close panel");
   await expect(page.locator(".panel")).toHaveCount(1);
 });
 
@@ -38,7 +39,7 @@ test("maximize fills the workspace and split restores the layout", async ({
     throw new Error("workspace geometry is unavailable");
   }
 
-  await first.locator(".panel-maximize").click();
+  await panelLayoutAction(first, "Maximize panel");
   await expect(page.locator(".panel")).toHaveCount(1);
   await expect(page.locator(".panel.maximized")).toHaveCount(1);
 
@@ -61,10 +62,12 @@ test("maximize fills the workspace and split restores the layout", async ({
     Math.abs(after.height + panelBarBox.height - workspaceBox.height),
   ).toBeLessThan(4);
   expect(Math.abs(after.width - workspaceBox.width)).toBeLessThan(4);
-  await expect(maximized.locator(".panel-maximize")).toHaveAttribute(
-    "title",
-    "Restore panel",
-  );
+  await expect(
+    maximized.getByRole("button", { name: "Minimize plot" }),
+  ).toBeEnabled();
+  await expect(
+    maximized.getByRole("button", { name: "Maximize plot" }),
+  ).toBeDisabled();
 
   await panelBar.locator(".maximized-panel-tab").last().click();
   await expect(page.locator(".panel.maximized")).toHaveAttribute(
@@ -72,7 +75,7 @@ test("maximize fills the workspace and split restores the layout", async ({
     "panel-2",
   );
 
-  await page.locator(".panel.maximized .panel-split-right").click();
+  await addPanel(page.locator(".panel.maximized"));
   await expect(page.locator(".panel")).toHaveCount(3);
   await expect(page.locator(".panel.maximized")).toHaveCount(0);
   await expect(page.locator(".panel").last()).toBeVisible();
@@ -312,6 +315,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
       {
         id: "legend-probe-panel",
         title: "Many series",
+        content: { kind: "line2d" },
         axis_style: "inline",
         axis_equal: false,
         x_scale: null,
@@ -1015,8 +1019,8 @@ test("selector filter binds and saves a live set", async ({ page }) => {
   await second.dispatchEvent("drop", { dataTransfer });
   await expect(second.locator(".binding-chip")).toHaveCount(1);
 
-  await second.locator(".panel-close").click();
-  await first.locator(".panel-close").click();
+  await panelLayoutAction(second, "Close panel");
+  await panelLayoutAction(first, "Close panel");
   await expect(page.locator(".panel")).toHaveCount(0);
   const emptyTransfer = await page.evaluateHandle(() => new DataTransfer());
   await setRow.dispatchEvent("dragstart", { dataTransfer: emptyTransfer });

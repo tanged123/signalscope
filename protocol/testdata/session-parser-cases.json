@@ -32,31 +32,44 @@
     "show_stats": false,
     "stat_columns": ["min", "max", "mean", "rms", "cursor"],
     "stats_sort": null,
-    "stats_sort_descending": false
+    "stats_sort_descending": false,
+    "content": {
+      "kind": "line2d"
+    }
   },
   "cases": [
     {
       "name": "independent axis reversal",
       "session": {},
-      "panel": { "x_reversed": true, "y_reversed": false },
+      "panel": {
+        "x_reversed": true,
+        "y_reversed": false
+      },
       "valid": true
     },
     {
       "name": "null axis reversal defaults",
       "session": {},
-      "panel": { "x_reversed": null, "y_reversed": null },
+      "panel": {
+        "x_reversed": null,
+        "y_reversed": null
+      },
       "valid": true
     },
     {
       "name": "X reversal must be a boolean",
       "session": {},
-      "panel": { "x_reversed": "true" },
+      "panel": {
+        "x_reversed": "true"
+      },
       "valid": false
     },
     {
       "name": "Y reversal must be a boolean",
       "session": {},
-      "panel": { "y_reversed": 1 },
+      "panel": {
+        "y_reversed": 1
+      },
       "valid": false
     },
     {
@@ -68,7 +81,9 @@
         "x_range": [1, 100],
         "y_range": [0.1, 10],
         "color_axis": {
-          "source": { "kind": "time" },
+          "source": {
+            "kind": "time"
+          },
           "scale": "log",
           "range": [1, 100]
         }
@@ -78,25 +93,35 @@
     {
       "name": "unknown X scale",
       "session": {},
-      "panel": { "x_scale": "symlog" },
+      "panel": {
+        "x_scale": "symlog"
+      },
       "valid": false
     },
     {
       "name": "unknown Y scale",
       "session": {},
-      "panel": { "y_scale": "symlog" },
+      "panel": {
+        "y_scale": "symlog"
+      },
       "valid": false
     },
     {
       "name": "non-positive log X limits",
       "session": {},
-      "panel": { "x_scale": "log", "x_range": [0, 100] },
+      "panel": {
+        "x_scale": "log",
+        "x_range": [0, 100]
+      },
       "valid": false
     },
     {
       "name": "negative log Y limits",
       "session": {},
-      "panel": { "y_scale": "log", "y_range": [-10, -1] },
+      "panel": {
+        "y_scale": "log",
+        "y_range": [-10, -1]
+      },
       "valid": false
     },
     {
@@ -104,7 +129,9 @@
       "session": {},
       "panel": {
         "color_axis": {
-          "source": { "kind": "time" },
+          "source": {
+            "kind": "time"
+          },
           "scale": "log",
           "range": [0, 100]
         }
@@ -115,32 +142,45 @@
       "name": "unknown C scale",
       "session": {},
       "panel": {
-        "color_axis": { "source": { "kind": "time" }, "scale": "symlog" }
+        "color_axis": {
+          "source": {
+            "kind": "time"
+          },
+          "scale": "symlog"
+        }
       },
       "valid": false
     },
     {
       "name": "equal axes",
       "session": {},
-      "panel": { "axis_equal": true },
+      "panel": {
+        "axis_equal": true
+      },
       "valid": true
     },
     {
       "name": "independent axes",
       "session": {},
-      "panel": { "axis_equal": false },
+      "panel": {
+        "axis_equal": false
+      },
       "valid": true
     },
     {
       "name": "default axes",
       "session": {},
-      "panel": { "axis_equal": null },
+      "panel": {
+        "axis_equal": null
+      },
       "valid": true
     },
     {
       "name": "invalid equal axes",
       "session": {},
-      "panel": { "axis_equal": "true" },
+      "panel": {
+        "axis_equal": "true"
+      },
       "valid": false
     },
     {
@@ -399,6 +439,55 @@
         }
       },
       "valid": true
+    },
+    {
+      "panel": {
+        "content": {
+          "kind": "scatter2d"
+        }
+      },
+      "name": "sampled scatter",
+      "session": {},
+      "valid": true
+    },
+    {
+      "panel": {
+        "content": {
+          "kind": "map"
+        }
+      },
+      "name": "unknown panel content",
+      "session": {},
+      "valid": false
+    },
+    {
+      "panel": {
+        "content": {
+          "kind": "scatter2d",
+          "unknown": 1
+        }
+      },
+      "name": "scatter does not carry arbitrary content fields",
+      "session": {},
+      "valid": false
+    },
+    {
+      "panel": {
+        "content": {
+          "kind": "scatter2d"
+        },
+        "color_axis": {
+          "source": {
+            "kind": "time"
+          },
+          "range": null,
+          "label": null,
+          "scale": null
+        }
+      },
+      "name": "scatter continuous color unavailable",
+      "session": {},
+      "valid": false
     }
   ]
 }

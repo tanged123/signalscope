@@ -12,6 +12,12 @@ are recorded in [ADRs](adr/README.md).
 
 ## Current product
 
+- Panel layout menus create Time series or Scatter to the left or right.
+  Creation restores a maximized grid and focuses the new panel. Scatter plots
+  sampled paired observations, with X/Y assignment, marker sizes, point picking,
+  axes and offline export. Session v33 migrates old panels to Line2D. Continuous
+  scatter color and density-preserving reduction remain future work (ADR 0066).
+
 - Chrome keeps dataset totals and chart metrics in the status bar, with
   compact plot, style, and readouts menus in each plot header. The header stays on
   one line; narrow control strips scroll while layout actions remain visible.
@@ -64,7 +70,7 @@ are recorded in [ADRs](adr/README.md).
 
 ## Deliberate limits
 
-- Scatter, histogram, FFT-specific UI, spectrogram, contour, and 3D
+- Histogram, FFT-specific UI, spectrogram, contour, and 3D
   presentation are not current capabilities. ADR 0052 defines typed
   plot-family seams; each future family needs a current data contract and an
   ADR.

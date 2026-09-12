@@ -4,11 +4,12 @@ import type { Range } from "../app/plot-math";
 import { DEFAULT_PANEL_LINE_WIDTH } from "../app/style-defaults";
 import type { ChartRenderRequest } from "../render/chart-host";
 import { resolvePalette, type SeriesStroke } from "../render/plot-theme";
-import type { RenderPanelState } from "./panel";
+import type { RenderPanelState } from "./panel-contracts";
 
 export function preparePanelRender(
   state: Pick<
     RenderPanelState,
+    | "content"
     | "series"
     | "axis_style"
     | "x_label"
@@ -26,6 +27,7 @@ export function preparePanelRender(
 ) {
   const palette = resolvePalette();
   const family = line2dFamily(data).prepare({
+    primitive: state.content.kind === "scatter2d" ? "points" : "line",
     colorCount: palette.series.length,
     contour: palette.contour,
     series: state.series,

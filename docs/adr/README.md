@@ -75,6 +75,8 @@ progress; amend earlier records with explicit links when their guidance changes.
 56. [Axis direction](0064-axis-direction.md)
 57. [Compact panel configuration menus](0065-panel-toolbar-groups.md)
 
+58. [Scatter panels and panel creation](0066-scatter-panels-and-creation.md)
+
 ## Superseded decisions
 
 These records are retained for history and are not implementation guidance:

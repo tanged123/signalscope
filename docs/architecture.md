@@ -44,6 +44,17 @@ display ranges to equal units per pixel using the plot rectangle and publishes
 those ranges to interactions and overlays; requested limits remain separate for
 resize and disabling. See [ADR 0060](adr/0060-equal-axis-scale.md).
 
+Panel content is a generated tagged union: Line2D and sampled Scatter2D share
+Cartesian axes, bindings and annotations (ADR 0066). `app/panel-content.ts`
+owns paired-query selection; scatter always uses actual paired observations.
+`app/panel-layout.ts` validates split admission before allocation and updates
+layout/focus; `app/panel-defaults.ts` constructs new state. WorkspaceModel
+retains document and revision ownership. `ui/panel-contracts.ts` defines view
+inputs independently of PanelView. `ui/panel-layout-actions.ts` connects layout
+mutations to publication; `ui/panel-layout-menu.ts` supplies creation through a
+keyboard-accessible popover lifecycle. Scatter uses point
+picking and ChartHost point publication with the existing cache/resource policy.
+
 ## System boundaries
 
 Arrows below mean **depends on**, not data flow. This is the crate/host boundary;
@@ -250,7 +261,7 @@ adding a subclass. `PanelShell` is a reuse candidate for chrome. Legend geometry
 is reusable where its interaction contract fits, not guaranteed unchanged for
 every plot.
 
-Add a panel-content session union only with the second concrete content type.
+The panel-content union represents the two implemented Cartesian types.
 Build one vertical slice through live data, presentation, persistence, and bake
 before extracting a generalized family registry. Estimate cost from required
 algorithms and validation; historical lines of code are not an engineering

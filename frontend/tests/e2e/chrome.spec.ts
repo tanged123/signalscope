@@ -1,3 +1,4 @@
+import { addPanel } from "./fixtures";
 import { expect, gotoApp, test } from "./fixtures";
 import manifest from "../../package.json" with { type: "json" };
 
@@ -196,7 +197,7 @@ test("compact plot menus retain settings and a single header row", async ({
       .evaluate((bar) => bar.scrollWidth <= bar.clientWidth);
     expect(fits).toBe(true);
   }
-  await panel.locator(".panel-split-right").click();
+  await addPanel(panel);
   await page.setViewportSize({ width: 1100, height: 900 });
   for (const header of await page.locator(".panel-header").all()) {
     expect(

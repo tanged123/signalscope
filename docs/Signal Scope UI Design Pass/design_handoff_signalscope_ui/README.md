@@ -50,6 +50,11 @@ App shell rows: menu bar 28px · toolbar 34px · [tree 262px | panel grid] · fo
 - **Panel:** 26px header = drag handle ⠿ · editable title · mode pills T·XY·FFT·H (always visible; active = surface-4+fg-1) · legend chips · dashed `x:` / `c:` chips (XY) · ⊞ ⤢ ✕. Focus = amber inset. Resize via seam handles; rearrange via header drag. Optional stats strip: per-series min/max/μ/rms of visible region.
 - **Status bar:** connection + source count · total pts · render ms · cursor t · gesture hint strip · ⌘K. Reserved disabled `⏸ FOLLOW` slot in toolbar for future streaming.
 
+Panel creation keeps five top-right buttons (ADR 0066): add left, add right,
+minimize, maximize, and a dropdown. In the dropdown choose
+Left/Right, then Time series/Scatter; minimize restores the grid from a
+maximized panel. Close remains in the dropdown. Only implemented types are offered.
+
 ## Axes (final — see F2, F3, and F6 cards)
 - **Every plot owns complete axes.** Spine (left+bottom, `--fg-3` 1px), outward 4px ticks, numeric tick labels (mono 9px `--fg-3`), and a full axis NAME with unit on both x and y ("time (s)", "velocity (m/s)"; mono 9.5px `--fg-2`, editable in place). No naked plots. No shared/implied axes across panels — every panel self-describing.
 - **Axis style per panel:** `axes: gutter · inline`. Gutter (default): left 52px / bottom 34px gutters, zero-line `--border-strong`. Inline: tick labels ON gridlines inside the plot with translucent `surface-0` ~80% backing; full axis names as corner tags (top-left = y, bottom-right = x). Identical information both ways; flag serializes into sessions/snapshots.
