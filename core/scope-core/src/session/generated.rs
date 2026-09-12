@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 32;
+pub const SESSION_SCHEMA_VERSION: u32 = 33;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -306,6 +306,7 @@ pub struct PanelState {
     #[serde(default)]
     pub stats_sort: Option<StatColumn>,
     pub stats_sort_descending: bool,
+    pub content: PanelContent,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -374,4 +375,11 @@ pub struct Session {
     pub derived: Vec<DerivedSignal>,
     pub derived_bundles: Vec<DerivedBundleState>,
     pub sources: Vec<SourceRecord>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PanelContent {
+    Line2d,
+    Scatter2d,
 }

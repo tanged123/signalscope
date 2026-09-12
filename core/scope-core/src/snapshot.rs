@@ -591,6 +591,7 @@ mod tests {
 
     fn panel(id: &str, paths: &[&str]) -> PanelState {
         PanelState {
+            content: crate::session::PanelContent::Line2d,
             id: id.to_owned(),
             title: "Panel".to_owned(),
             axis_style: AxisStyle::Gutter,

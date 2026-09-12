@@ -22,6 +22,7 @@ interface Line2DAxisInput {
 }
 
 export interface Line2DRenderInput {
+  primitive?: "line" | "points";
   axisEqual?: boolean;
   xReversed?: boolean;
   yReversed?: boolean;

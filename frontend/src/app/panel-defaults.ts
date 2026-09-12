@@ -1,0 +1,47 @@
+import type { PanelContent, PanelState } from "../generated/session";
+import { DEFAULT_PANEL_LINE_WIDTH } from "./style-defaults";
+
+export function createPanelState(
+  number: number,
+  content: PanelContent = { kind: "line2d" },
+): PanelState {
+  return {
+    id: `panel-${String(number)}`,
+    content: { ...content },
+    title: `Panel ${String(number)}`,
+    axis_style: "inline",
+    axis_equal: false,
+    x_scale: null,
+    y_scale: null,
+    x_reversed: null,
+    y_reversed: null,
+    bindings: [],
+    color_by: "source",
+    dash_by: null,
+    width_by: null,
+    line_width: DEFAULT_PANEL_LINE_WIDTH,
+    ghost_opacity: 0.5,
+    overrides: [],
+    focus: [],
+    ghost_mode: "all",
+    legend_state: "keys",
+    legend_position: null,
+    legend_size: null,
+    legend_anchor: null,
+    legend_dock: null,
+    legend_hint_dismissed: false,
+    x_axis: { kind: "time" },
+    color_axis: null,
+    y_range: null,
+    x_range: null,
+    x_label: null,
+    y_label: null,
+    time_window: null,
+    annotations: [],
+    annotation_display: "labels",
+    show_stats: false,
+    stat_columns: ["min", "max", "mean", "rms", "cursor"],
+    stats_sort: null,
+    stats_sort_descending: false,
+  };
+}

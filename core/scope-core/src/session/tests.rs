@@ -1,5 +1,29 @@
 use super::*;
 
+#[test]
+fn line_sessions_migrate_and_scatter_round_trips() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../protocol/testdata/session-parser-cases.json"
+    ))
+    .unwrap();
+    let mut value = serde_json::to_value(Session::default()).unwrap();
+    value["schema_version"] = 32.into();
+    let mut panel = fixture["panel"].clone();
+    panel.as_object_mut().unwrap().remove("content");
+    value["tabs"][0]["panels"] = serde_json::json!([panel]);
+    let mut session = from_json(&value.to_string()).unwrap();
+    assert!(matches!(
+        session.tabs[0].panels[0].content,
+        PanelContent::Line2d
+    ));
+    session.tabs[0].panels[0].content = PanelContent::Scatter2d;
+    let restored = from_json(&serde_json::to_string(&session).unwrap()).unwrap();
+    assert!(matches!(
+        restored.tabs[0].panels[0].content,
+        PanelContent::Scatter2d
+    ));
+}
+
 const SESSION_FIXTURE_PATH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../protocol/testdata/session-conformance.json"
@@ -175,6 +199,7 @@ fn current_session_round_trips() {
             focused_panel_id: Some("panel-a".into()),
             maximized_panel_id: None,
             panels: vec![PanelState {
+                content: crate::session::PanelContent::Line2d,
                 id: "panel-a".into(),
                 title: "Body velocity".into(),
                 axis_style: AxisStyle::Gutter,

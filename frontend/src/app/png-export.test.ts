@@ -7,6 +7,7 @@ function panel(id: string, title: string): PanelState {
   return {
     id,
     title,
+    content: { kind: "line2d" },
     axis_style: "gutter",
     axis_equal: false,
     x_scale: null,

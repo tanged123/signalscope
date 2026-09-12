@@ -30,6 +30,8 @@ export function setColorAxis(
   panel: PanelState,
   axis: ColorAxis | null,
 ): "binding" | "scale" | false {
+  if (panel.content.kind === "scatter2d" && axis !== null)
+    throw new Error("Scatter does not support a continuous color axis.");
   if (JSON.stringify(panel.color_axis) === JSON.stringify(axis)) return false;
   if (
     axis?.range != null &&
@@ -84,6 +86,7 @@ export function resolveLineBindings(
   ys: readonly { ref: SeriesRef; path: string }[],
   catalog: Catalog,
   color: ColorAxis | null = null,
+  paired = false,
 ): LineBindings {
   const result: LineBindings = { ids: [], xId: null, missing: [] };
   const groups = new Map<string, string[]>();
@@ -124,6 +127,14 @@ export function resolveLineBindings(
       result.missing.length > 0
         ? []
         : [...groups].map(([xId, ids]) => ({ xId, ids }));
+    result.xId = result.groups[0]?.xId ?? null;
+  }
+  if (paired && axis.kind === "time" && color === null) {
+    result.groups = result.ids.map((id) => ({
+      xId: id,
+      ids: [id],
+      timeX: true,
+    }));
     result.xId = result.groups[0]?.xId ?? null;
   }
   if (color !== null) {

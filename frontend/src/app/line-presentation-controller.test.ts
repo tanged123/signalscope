@@ -100,7 +100,11 @@ type ControllerProbe = {
 };
 
 function panel(id: string): PanelState {
-  return { id, x_axis: { kind: "time" } } as PanelState;
+  return {
+    id,
+    content: { kind: "line2d" },
+    x_axis: { kind: "time" },
+  } as PanelState;
 }
 
 function controllerProbe(
@@ -161,6 +165,51 @@ function controllerProbe(
 }
 
 describe("LinePresentationController", () => {
+  it("queries time scatter as paired samples and retains the published response", async () => {
+    const probe = controllerProbe(() => Promise.resolve(tileResponse()));
+    const scatterPanel = probe.panels[0];
+    if (scatterPanel === undefined) throw new Error("Missing panel");
+    scatterPanel.content = { kind: "scatter2d" };
+    probe.panelSignalIds.mockReturnValue({
+      ids: ["1"],
+      xId: "1",
+      missing: [],
+      groups: [{ xId: "1", ids: ["1"], timeX: true }],
+    });
+    probe.queryLine2D.mockResolvedValue({
+      requestId: "scatter",
+      level: 0,
+      anchor: new Float64Array([0, 1, 2, 3, 4, 5]),
+      x: {
+        signalId: "1",
+        signalPath: "run/y",
+        unit: "V",
+        values: new Float64Array([9, 2, 4, 6, 8, 1]),
+      },
+      ys: [
+        {
+          signalId: "1",
+          signalPath: "run/y",
+          unit: "V",
+          values: new Float64Array([9, 2, 4, 6, 8, 1]),
+        },
+      ],
+    });
+    await probe.controller.refresh();
+    expect(probe.queryTiles).not.toHaveBeenCalled();
+    expect(probe.queryLine2D).toHaveBeenCalledOnce();
+    const response = [...probe.controller.responses()][0];
+    expect(response?.kind).toBe("signal");
+    if (response?.kind !== "signal")
+      throw new Error("missing scatter response");
+    expect([...response.response.x.values]).toEqual([0, 1, 2, 3, 4, 5]);
+    expect([...(response.response.ys[0]?.values ?? [])]).toEqual([
+      9, 2, 4, 6, 8, 1,
+    ]);
+    await probe.controller.refresh();
+    expect(probe.queryLine2D).toHaveBeenCalledOnce();
+    probe.controller.dispose();
+  });
   beforeEach(() => {
     prepareTimeTiles.mockReset();
     prepareSignalXLine.mockReset();
@@ -657,6 +706,7 @@ describe("LinePresentationController", () => {
   });
 
   it("schedules render and refresh work after a resize", () => {
+    vi.useFakeTimers();
     const requestAnimationFrame = vi.fn();
     vi.stubGlobal("requestAnimationFrame", requestAnimationFrame);
     const setTimeout = vi.spyOn(window, "setTimeout");
@@ -670,5 +720,7 @@ describe("LinePresentationController", () => {
     expect(requestAnimationFrame).toHaveBeenCalledOnce();
     expect(setTimeout).toHaveBeenCalledOnce();
     expect(setTimeout.mock.calls[0]?.[1]).toBe(50);
+    probe.controller.dispose();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

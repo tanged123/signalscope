@@ -1,3 +1,6 @@
+import { createPanelState } from "./panel-defaults";
+import { splitPanel } from "./panel-layout";
+import type { PanelContent } from "../generated/session";
 import type {
   Annotation,
   Binding,
@@ -23,7 +26,6 @@ import type {
   SampleAxisSource,
 } from "../generated/session";
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
-import { DEFAULT_PANEL_LINE_WIDTH } from "./style-defaults";
 
 import { setXAxis, setColorAxis, removeAxisRef } from "./line-bindings";
 import {
@@ -346,51 +348,45 @@ export class WorkspaceModel {
     return null;
   }
 
-  addPanelRow(): PanelState {
+  addPanelRow(content: PanelContent = { kind: "line2d" }): PanelState {
     this.activeTab().maximized_panel_id = null;
-    const panel = this.createPanel();
+    const panel = this.createPanel(content);
     this.appendRow(panel.id);
     this.activeTab().focused_panel_id = panel.id;
     this.touch(true);
     return panel;
   }
 
-  splitPanelRight(id: string): PanelState | null {
-    const location = this.locate(id);
-    if (location === null) return null;
-    const row = this.activeTab().layout[location.rowIndex];
-    const cell = row?.panels[location.cellIndex];
-    if (row === undefined || cell === undefined) return null;
-    if (cell.width < MIN_FRACTION * 2) return null;
-    this.activeTab().maximized_panel_id = null;
-    const panel = this.createPanel();
-    const width = cell.width / 2;
-    cell.width = width;
-    row.panels.splice(location.cellIndex + 1, 0, {
-      panel_id: panel.id,
-      width,
-    });
-    this.activeTab().focused_panel_id = panel.id;
-    this.touch(true);
+  splitPanelLeft(
+    id: string,
+    content: PanelContent = { kind: "line2d" },
+  ): PanelState | null {
+    const panel = splitPanel(this.activeTab(), id, "left", () =>
+      this.createPanel(content),
+    );
+    if (panel !== null) this.touch(true);
     return panel;
   }
 
-  splitPanelDown(id: string): PanelState | null {
-    const location = this.locate(id);
-    if (location === null) return null;
-    const row = this.activeTab().layout[location.rowIndex];
-    if (row === undefined) return null;
-    if (row.height < MIN_FRACTION * 2) return null;
-    this.activeTab().maximized_panel_id = null;
-    const panel = this.createPanel();
-    const height = row.height / 2;
-    row.height = height;
-    this.activeTab().layout.splice(location.rowIndex + 1, 0, {
-      height,
-      panels: [{ panel_id: panel.id, width: 1 }],
-    });
-    this.activeTab().focused_panel_id = panel.id;
-    this.touch(true);
+  splitPanelRight(
+    id: string,
+    content: PanelContent = { kind: "line2d" },
+  ): PanelState | null {
+    const panel = splitPanel(this.activeTab(), id, "right", () =>
+      this.createPanel(content),
+    );
+    if (panel !== null) this.touch(true);
+    return panel;
+  }
+
+  splitPanelDown(
+    id: string,
+    content: PanelContent = { kind: "line2d" },
+  ): PanelState | null {
+    const panel = splitPanel(this.activeTab(), id, "below", () =>
+      this.createPanel(content),
+    );
+    if (panel !== null) this.touch(true);
     return panel;
   }
 
@@ -1155,48 +1151,11 @@ export class WorkspaceModel {
     });
   }
 
-  private createPanel(): PanelState {
+  private createPanel(content: PanelContent = { kind: "line2d" }): PanelState {
     this.nextPanelNumber = nextUnusedNumber(this.nextPanelNumber, (number) =>
       this.panelIdExists(`panel-${String(number)}`),
     );
-    const panel: PanelState = {
-      id: `panel-${String(this.nextPanelNumber)}`,
-      title: `Panel ${String(this.nextPanelNumber)}`,
-      axis_style: "inline",
-      axis_equal: false,
-      x_scale: null,
-      y_scale: null,
-      x_reversed: null,
-      y_reversed: null,
-      bindings: [],
-      color_by: "source",
-      dash_by: null,
-      width_by: null,
-      line_width: DEFAULT_PANEL_LINE_WIDTH,
-      ghost_opacity: 0.5,
-      overrides: [],
-      focus: [],
-      ghost_mode: "all",
-      legend_state: "keys",
-      legend_position: null,
-      legend_size: null,
-      legend_anchor: null,
-      legend_dock: null,
-      legend_hint_dismissed: false,
-      x_axis: { kind: "time" },
-      color_axis: null,
-      y_range: null,
-      x_range: null,
-      x_label: null,
-      y_label: null,
-      time_window: null,
-      annotations: [],
-      annotation_display: "labels",
-      show_stats: false,
-      stat_columns: ["min", "max", "mean", "rms", "cursor"],
-      stats_sort: null,
-      stats_sort_descending: false,
-    };
+    const panel = createPanelState(this.nextPanelNumber, content);
     this.nextPanelNumber += 1;
     this.activeTab().panels.push(panel);
     return panel;

@@ -147,6 +147,7 @@ function timeState(series: RenderSeries[]): RenderPanelState {
   return {
     id: "panel",
     title: "Time",
+    content: { kind: "line2d" },
     axis_style: "gutter",
     axis_equal: false,
     x_scale: null,

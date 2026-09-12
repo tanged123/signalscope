@@ -106,7 +106,10 @@ pub(super) fn line_combinations(
     let mut combinations = BTreeSet::new();
     for tab in &session.tabs {
         for panel in &tab.panels {
-            if matches!(panel.x_axis, SampleAxisSource::Time) && panel.color_axis.is_none() {
+            if matches!(panel.x_axis, SampleAxisSource::Time)
+                && panel.color_axis.is_none()
+                && matches!(panel.content, crate::session::PanelContent::Line2d)
+            {
                 continue;
             }
             let mut groups = BTreeMap::<SignalId, Vec<SignalId>>::new();
@@ -265,6 +268,22 @@ mod tests {
             label: None,
         });
         (session, store, pyramids, cs)
+    }
+
+    #[test]
+    fn scatter_captures_actual_paired_rows_for_time_and_signal_x() {
+        let (mut session, store, _, refs) = colored_fixture();
+        let panel = &mut session.tabs[0].panels[0];
+        panel.color_axis = None;
+        assert!(line_combinations(&session, &store).unwrap().is_empty());
+        session.tabs[0].panels[0].content = crate::session::PanelContent::Scatter2d;
+        let time = line_combinations(&session, &store).unwrap();
+        assert_eq!(time.len(), 2);
+        assert!(time.iter().all(|(x, ys)| ys == &vec![*x]));
+        session.tabs[0].panels[0].x_axis = SampleAxisSource::Bundle { refs };
+        let xy = line_combinations(&session, &store).unwrap();
+        assert_eq!(xy.len(), 2);
+        assert!(xy.iter().all(|(x, ys)| !ys.contains(x)));
     }
 
     #[test]

@@ -163,6 +163,45 @@ async function hostFixture(reportFailure = vi.fn()): Promise<ChartHost> {
 }
 
 describe("ChartHost", () => {
+  it("publishes scatter markers once and retains range-only updates and disposal", async () => {
+    const host = await hostFixture();
+    const base = request();
+    const scatter = { ...base, primitive: "points" as const };
+    host.render(scatter);
+    const chart = state.charts.at(-1);
+    if (chart === undefined) throw new Error("Missing chart");
+    expect(chart.options.series).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "scatter",
+          mode: "points",
+          sampling: "none",
+          symbol: "circle",
+        }),
+      ]),
+    );
+    expect(chart.setOption).toHaveBeenCalledOnce();
+    host.render({ ...scatter, xRange: { min: 10.5, max: 11.5 } });
+    expect(chart.setOption).toHaveBeenCalledOnce();
+    expect(chart.setViewRange).toHaveBeenCalledOnce();
+    host.render({
+      ...scatter,
+      series: scatter.series.map((series) => ({
+        ...series,
+        style: { ...series.style, width: 3, dash: "dash" as const },
+      })),
+    });
+    expect(chart.setOption).toHaveBeenCalledTimes(2);
+    expect(chart.options.series).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ symbol: "rect", symbolSize: 9 }),
+      ]),
+    );
+    host.render(base);
+    expect(chart.setOption).toHaveBeenCalledTimes(3);
+    host.dispose();
+    expect(chart.dispose).toHaveBeenCalledOnce();
+  });
   it.each([false, true])(
     "uses log coordinates with reversal=%s while retaining raw ranges and range-only zoom",
     async (reversed) => {

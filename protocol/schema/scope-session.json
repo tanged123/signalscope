@@ -1,5 +1,5 @@
 {
-  "schema_version": 32,
+  "schema_version": 33,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -23,9 +23,18 @@
       "variants": ["none", "track", "measure"],
       "default": "none"
     },
-    "AxisStyle": { "kind": "enum", "variants": ["gutter", "inline"] },
-    "AxisScale": { "kind": "enum", "variants": ["linear", "log"] },
-    "DashStyle": { "kind": "enum", "variants": ["solid", "dash", "dot"] },
+    "AxisStyle": {
+      "kind": "enum",
+      "variants": ["gutter", "inline"]
+    },
+    "AxisScale": {
+      "kind": "enum",
+      "variants": ["linear", "log"]
+    },
+    "DashStyle": {
+      "kind": "enum",
+      "variants": ["solid", "dash", "dot"]
+    },
     "StatColumn": {
       "kind": "enum",
       "variants": ["min", "max", "mean", "rms", "cursor", "n"]
@@ -43,15 +52,26 @@
     },
     "SeriesRef": {
       "kind": "object",
-      "fields": { "source_key": "string", "channel": "string" }
+      "fields": {
+        "source_key": "string",
+        "channel": "string"
+      }
     },
     "SampleAxisSource": {
       "kind": "tagged_union",
       "tag": "kind",
       "variants": {
         "time": {},
-        "signal": { "fields": { "ref": "SeriesRef" } },
-        "bundle": { "fields": { "refs": "SeriesRef[]" } }
+        "signal": {
+          "fields": {
+            "ref": "SeriesRef"
+          }
+        },
+        "bundle": {
+          "fields": {
+            "refs": "SeriesRef[]"
+          }
+        }
       }
     },
     "ColorAxis": {
@@ -63,7 +83,10 @@
         "label": "string?"
       }
     },
-    "BindingKind": { "kind": "enum", "variants": ["query", "pick", "set"] },
+    "BindingKind": {
+      "kind": "enum",
+      "variants": ["query", "pick", "set"]
+    },
     "Binding": {
       "kind": "object",
       "fields": {
@@ -121,7 +144,10 @@
       "kind": "enum",
       "variants": ["left", "right", "top", "bottom"]
     },
-    "NamedSetKind": { "kind": "enum", "variants": ["query", "pick"] },
+    "NamedSetKind": {
+      "kind": "enum",
+      "variants": ["query", "pick"]
+    },
     "AnnotationDisplay": {
       "kind": "enum",
       "variants": ["labels", "markers", "hidden"],
@@ -187,7 +213,8 @@
         "show_stats": "bool",
         "stat_columns": "StatColumn[]",
         "stats_sort": "StatColumn?",
-        "stats_sort_descending": "bool"
+        "stats_sort_descending": "bool",
+        "content": "PanelContent"
       }
     },
     "LayoutCell": {
@@ -256,6 +283,14 @@
         "derived": "DerivedSignal[]",
         "derived_bundles": "DerivedBundleState[]",
         "sources": "SourceRecord[]"
+      }
+    },
+    "PanelContent": {
+      "kind": "tagged_union",
+      "tag": "kind",
+      "variants": {
+        "line2d": {},
+        "scatter2d": {}
       }
     }
   }

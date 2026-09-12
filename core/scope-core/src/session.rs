@@ -83,6 +83,14 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
     // with deny_unknown_fields. Preserve the time/signal correlation here.
     for tab in current["tabs"].as_array().into_iter().flatten() {
         for panel in tab["panels"].as_array().into_iter().flatten() {
+            if panel["content"]
+                .as_object()
+                .is_none_or(|content| content.len() != 1)
+            {
+                return Err(SessionError::Json(serde::de::Error::custom(
+                    "invalid panel content",
+                )));
+            }
             for axis in [&panel["x_axis"], &panel["color_axis"]["source"]] {
                 if axis["kind"] == "time"
                     && (axis.get("ref").is_some() || axis.get("refs").is_some())
@@ -96,6 +104,11 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
     }
     let session: Session = serde_json::from_value(current)?;
     for panel in session.tabs.iter().flat_map(|tab| &tab.panels) {
+        if matches!(panel.content, PanelContent::Scatter2d) && panel.color_axis.is_some() {
+            return Err(SessionError::Json(serde::de::Error::custom(
+                "scatter does not support a continuous color axis",
+            )));
+        }
         for (scale, range) in [
             (panel.x_scale, panel.x_range),
             (panel.y_scale, panel.y_range),
@@ -151,6 +164,7 @@ const MIGRATIONS: &[(u32, Migration)] = &[
     (29, migrate_v29),
     (30, migrate_v30),
     (31, migrate_v31),
+    (32, migrate_v32),
 ];
 
 fn migrate_v29(mut value: serde_json::Value) -> serde_json::Value {
@@ -158,8 +172,28 @@ fn migrate_v29(mut value: serde_json::Value) -> serde_json::Value {
     value
 }
 
-fn migrate_v31(mut value: serde_json::Value) -> serde_json::Value {
+fn migrate_v32(mut value: serde_json::Value) -> serde_json::Value {
+    for panel in value
+        .get_mut("tabs")
+        .and_then(serde_json::Value::as_array_mut)
+        .into_iter()
+        .flatten()
+        .flat_map(|tab| {
+            tab.get_mut("panels")
+                .and_then(serde_json::Value::as_array_mut)
+                .into_iter()
+                .flatten()
+        })
+        .filter_map(serde_json::Value::as_object_mut)
+    {
+        panel.insert("content".into(), serde_json::json!({ "kind": "line2d" }));
+    }
     value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    value
+}
+
+fn migrate_v31(mut value: serde_json::Value) -> serde_json::Value {
+    value["schema_version"] = 32.into();
     value
 }
 

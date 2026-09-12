@@ -5,6 +5,7 @@ import {
   type ChartGPUInstance,
   type ChartGPUOptions,
   type LineSeriesConfig,
+  type ScatterSeriesConfig,
 } from "@chartgpu/chartgpu";
 import type { Range, PlotLayout } from "../app/plot-math";
 import { axisCoordinate, axisValue } from "../app/plot-math";
@@ -41,7 +42,8 @@ interface SeriesElement {
   emphasisActive: boolean;
   ghostOpacityScale: number;
   palette: Palette;
-  element: LineSeriesConfig;
+  primitive: "line" | "points";
+  element: LineSeriesConfig | ScatterSeriesConfig;
 }
 
 export class ChartHost {
@@ -129,6 +131,7 @@ export class ChartHost {
       1,
       Math.sqrt(FULL_OPACITY_GHOST_COUNT / Math.max(1, ghostCount)),
     );
+    const primitive = request.primitive ?? "line";
     const series = request.series.map((line, index) => {
       const data = this.directedFeed(
         line.data,
@@ -140,6 +143,7 @@ export class ChartHost {
       const previous = this.elements[index];
       if (
         previous !== undefined &&
+        previous.primitive === primitive &&
         previous.id === line.id &&
         previous.name === line.name &&
         previous.data === data &&
@@ -173,21 +177,39 @@ export class ChartHost {
       const width =
         (style.width + (isEmphasized ? 0.4 : 0)) *
         request.palette.lineWidthScale;
-      const element: LineSeriesConfig = {
-        type: "line",
-        name: line.name,
-        data,
-        pointColors: line.pointColors,
-        sampling: "none",
-        color,
-        lineStyle: {
-          color,
-          width,
-          opacity,
-          dash: style.dash,
-        },
-      };
+      const element: LineSeriesConfig | ScatterSeriesConfig =
+        primitive === "points"
+          ? {
+              type: "scatter",
+              mode: "points",
+              name: line.name,
+              data,
+              sampling: "none",
+              color: pointColor(color, opacity),
+              symbolSize: Math.max(2, width * 3),
+              symbol:
+                style.dash === "dash"
+                  ? "rect"
+                  : style.dash === "dot"
+                    ? "triangle"
+                    : "circle",
+            }
+          : {
+              type: "line",
+              name: line.name,
+              data,
+              pointColors: line.pointColors,
+              sampling: "none",
+              color,
+              lineStyle: {
+                color,
+                width,
+                opacity,
+                dash: style.dash,
+              },
+            };
       this.elements[index] = {
+        primitive,
         id: line.id,
         name: line.name,
         data,
@@ -327,7 +349,7 @@ export class ChartHost {
 
   private makeOptions(
     request: ChartRenderRequest,
-    series: readonly LineSeriesConfig[],
+    series: readonly (LineSeriesConfig | ScatterSeriesConfig)[],
   ): ChartGPUOptions {
     return {
       animation: false,
@@ -543,4 +565,11 @@ function isGhost(
   line: Line2DRenderRequest["series"][number] | undefined,
 ): boolean {
   return line?.style.hue === null;
+}
+
+function pointColor(color: string, opacity: number): string {
+  const hex = color.replace("#", "");
+  const expanded = hex.length === 3 ? hex.replace(/./g, "$&$&") : hex;
+  const value = Number.parseInt(expanded, 16);
+  return `rgba(${String((value >> 16) & 255)}, ${String((value >> 8) & 255)}, ${String(value & 255)}, ${String(opacity)})`;
 }
