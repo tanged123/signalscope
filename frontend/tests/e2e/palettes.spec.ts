@@ -17,6 +17,9 @@ test("settings palettes support keyboard access, custom editing, cancellation an
     .selectOption("tol_contrast");
   await dialog.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(dialog).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Application menu", exact: true }),
+  ).toBeFocused();
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -36,6 +39,9 @@ test("settings palettes support keyboard access, custom editing, cancellation an
     .fill("#ff00ff");
   await dialog.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(dialog).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Application menu", exact: true }),
+  ).toBeFocused();
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -57,6 +63,9 @@ test("settings palettes support keyboard access, custom editing, cancellation an
   await contour.getByRole("checkbox", { name: "Reverse" }).check();
   await contour.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(contour).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Application menu", exact: true }),
+  ).toBeFocused();
   await expect
     .poll(() =>
       page.evaluate(

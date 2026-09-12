@@ -12,7 +12,6 @@ export default defineConfig({
   // SwiftShader can briefly reject a context while the preceding test's GPU
   // device is being released. Retry the isolated test with a fresh context.
   retries: process.env.CI ? 2 : 0,
-  maxFailures: process.env.CI ? 1 : 0,
   metadata: {
     coverage,
   },

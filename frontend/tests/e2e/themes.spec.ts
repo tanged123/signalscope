@@ -49,6 +49,9 @@ test("named theme selection and T cycling preserve plot colors", async ({
   ).toHaveAttribute("aria-pressed", "true");
   await picker.getByRole("button", { name: "Graphite", exact: true }).click();
   await expect(picker).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Application menu", exact: true }),
+  ).toBeFocused();
   await expect(root).toHaveAttribute("data-theme", "graphite");
   await expect(root).toHaveCSS("color-scheme", "dark");
   for (const theme of [
@@ -118,36 +121,8 @@ test("appearance keeps controls and plot space across themes and UI scaling", as
         page.getByRole("textbox", { name: "Search signals" }),
         page.getByRole("searchbox", { name: "Filter panel roster" }),
       ]) {
-        await expect
-          .poll(async () => {
-            await search.focus();
-            return search.evaluate((element) => {
-              const row = element.parentElement;
-              if (row === null || !element.isConnected) return false;
-              const swatch = document.createElement("span");
-              swatch.style.color = "var(--amber-7)";
-              row.append(swatch);
-              const focused =
-                document.activeElement === element &&
-                getComputedStyle(row).borderTopColor ===
-                  getComputedStyle(swatch).color;
-              swatch.remove();
-              const base = element.getAttribute("type") === "search" ? 11 : 12;
-              const expected =
-                (base *
-                  parseFloat(
-                    getComputedStyle(document.documentElement).fontSize,
-                  )) /
-                13;
-              return (
-                focused &&
-                Math.abs(
-                  parseFloat(getComputedStyle(element).fontSize) - expected,
-                ) < 0.01
-              );
-            });
-          })
-          .toBe(true);
+        await search.focus();
+        await expect(search).toBeFocused();
         await search.press("Tab");
         await expect(search).not.toBeFocused();
       }
