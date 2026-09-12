@@ -69,3 +69,8 @@ schema checks, and snapshot validation; the quality gate also passed. Full
 browser validation is delegated to GitHub CI. Earlier dense-legend checks
 belong to the previous revision. Browser validation uses Chromium, not
 packaged Electron.
+
+The XY follow-up passed the complete focused browser test locally, including
+color-scale placement, axis settings, GPU rendering, export, and offline restore.
+Legend editing checks explicitly select expanded mode; simple mode keeps the
+color scale on the plot.

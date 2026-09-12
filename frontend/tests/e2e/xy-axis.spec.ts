@@ -265,12 +265,6 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
     await panel.getByRole("button", { name: "Apply", exact: true }).click();
     await expect(colorbar).toHaveAttribute("aria-label", /20 to 80/);
     const legend = panel.locator(".plot-series-legend");
-    await expect(legend.locator(".colorbar-canvas")).toBeVisible();
-    await expect(legend.locator('[data-property="color"]')).toHaveCount(0);
-    await legend.locator(".legend-color-scale").focus();
-    await page.keyboard.press("Enter");
-    await expect(panel.locator(".axis-picker input")).toBeFocused();
-    await page.keyboard.press("Escape");
     const setLegend = async (
       mode: "badge" | "keys" | "roster" | "rail",
     ): Promise<void> => {
@@ -288,6 +282,13 @@ test("live XY axes select unplotted time and source-paired bundles by keyboard",
         .click();
       await expect(legend).toHaveAttribute("data-state", mode);
     };
+    await setLegend("roster");
+    await expect(legend.locator(".colorbar-canvas")).toBeVisible();
+    await expect(legend.locator('[data-property="color"]')).toHaveCount(0);
+    await legend.locator(".legend-color-scale").focus();
+    await page.keyboard.press("Enter");
+    await expect(panel.locator(".axis-picker input")).toBeFocused();
+    await page.keyboard.press("Escape");
     await setLegend("badge");
     await expect(panel.locator(".chart-host > .colorbar-canvas")).toBeVisible();
     await expect(colorbar).toHaveAttribute("data-placement", "plot");
