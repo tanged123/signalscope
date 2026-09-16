@@ -1071,6 +1071,8 @@ describe("WorkspaceModel", () => {
     tab.panels.push({
       id: "panel-1",
       title: "Panel 1",
+      content: { kind: "line2d" },
+      content_selection_pending: false,
       axis_style: "gutter",
       axis_equal: false,
       x_scale: null,

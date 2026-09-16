@@ -146,6 +146,7 @@ interface Line2DPlotSeries {
  * rows are never joined by their plotted X values.
  */
 export interface Line2DPlotInput {
+  primitive?: "line" | "points" | undefined;
   xScale?: AxisScale | null;
   yScale?: AxisScale | null;
   linkedTime?: boolean | undefined;
@@ -368,7 +369,13 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
               x: projectX(layout, row.x),
               y: projectY(layout, row.y),
             };
-            if (previous !== null) {
+            if (input.primitive === "points") {
+              const squared = (current.x - x) ** 2 + (current.y - y) ** 2;
+              if (Number.isFinite(squared) && squared <= bestSquared) {
+                bestSquared = squared;
+                best = { path: series.path, distance: Math.sqrt(squared) };
+              }
+            } else if (previous !== null) {
               const hit = segmentHit(previous, current, x, y);
               if (hit.squared <= bestSquared && best === null) {
                 bestSquared = hit.squared;
@@ -407,8 +414,8 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
         y: paddedExtent(yMin, yMax, input.yScale),
       };
     },
-    cursorAt(layout, point) {
-      if (input.linkedTime === true) {
+    cursorAt(layout, point, radius) {
+      if (input.linkedTime === true && input.primitive !== "points") {
         const x = invertX(layout, point.x);
         const rows = visibleSeries().flatMap((series) => {
           let best: XYPoint | null = null;
@@ -453,7 +460,12 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
           }
         }
       }
-      if (nearestX === null || nearestIndex < 0 || nearestSeries === null)
+      if (
+        nearestX === null ||
+        nearestIndex < 0 ||
+        nearestSeries === null ||
+        (input.primitive === "points" && nearestDistance > radius * radius)
+      )
         return null;
       const rows = visibleSeries().flatMap((series) => {
         if (
@@ -477,20 +489,23 @@ export function prepareLine2DPlot(input: Line2DPlotInput): PreparedPlot {
       });
       return {
         x: nearestX,
-        heading: `x = ${formatValue(nearestX)}`,
+        heading:
+          input.linkedTime === true
+            ? `t = ${formatValue(nearestX)} s`
+            : `x = ${formatValue(nearestX)}`,
         rows,
         markers: rows.map((row) => ({
           x: nearestX,
           y: row.value,
           colorIndex: row.colorIndex,
         })),
-        link: "local",
+        link: input.linkedTime === true ? "time" : "local",
       };
     },
     annotationAt(layout, point, radius) {
       let best: AnnotationAnchor | null = null;
       let bestSquared = radius * radius;
-      for (const series of input.series) {
+      for (const series of visibleSeries()) {
         for (let index = 0; index < series.values.length; index += 1) {
           const row = rowFor(series, index);
           if (row === null) continue;

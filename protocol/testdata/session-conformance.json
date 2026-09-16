@@ -1,11 +1,11 @@
 {
   "app": "signalscope",
   "title": null,
-  "schema_version": 32,
+  "schema_version": 33,
   "theme": "dark",
   "linked_time": {
-    "t0": 0.0,
-    "t1": 1.0,
+    "t0": 0,
+    "t1": 1,
     "linked": true,
     "paused": false,
     "cursorT": null,

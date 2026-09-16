@@ -12,6 +12,16 @@ are recorded in [ADRs](adr/README.md).
 
 ## Current product
 
+- Panel layout menus create 2D line or Scatter to the right or below.
+  The header also offers direct Right/Down shortcuts for 2D line panels.
+  Panels created with N offer an inline type choice. Selecting a type, or
+  assigning signals directly, completes that choice; typed creation never asks again.
+  Creation restores a maximized grid and focuses the new panel. Scatter plots
+  sampled paired observations, with X/Y/C assignment, a labeled colorbar, point
+  picking, axes and offline export. Marker diameters range from 0.5 to 8 px with
+  a 2 px default. Session v33 migrates old panels to Line2D.
+  Density-preserving reduction remains future work (ADR 0066).
+
 - Chrome keeps dataset totals and chart metrics in the status bar, with
   compact plot, style, and readouts menus in each plot header. The header stays on
   one line; narrow control strips scroll while layout actions remain visible.
@@ -64,7 +74,7 @@ are recorded in [ADRs](adr/README.md).
 
 ## Deliberate limits
 
-- Scatter, histogram, FFT-specific UI, spectrogram, contour, and 3D
+- Histogram, FFT-specific UI, spectrogram, contour, and 3D
   presentation are not current capabilities. ADR 0052 defines typed
   plot-family seams; each future family needs a current data contract and an
   ADR.

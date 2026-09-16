@@ -40,6 +40,18 @@ declare module "@chartgpu/chartgpu" {
     visible?: boolean;
   }
 
+  export interface ScatterSeriesConfig {
+    pointColors?: Float32Array | undefined;
+    type: "scatter";
+    mode?: "points";
+    name?: string;
+    data: XYArraysData | ArrayBufferView;
+    sampling?: "none";
+    color?: string;
+    symbolSize?: number;
+    symbol?: "circle" | "rect" | "triangle";
+  }
+
   export interface AxisOptions {
     type: "value";
     name?: string;
@@ -61,7 +73,7 @@ declare module "@chartgpu/chartgpu" {
     gridLines?: { show?: boolean; color?: string };
     xAxis?: AxisOptions;
     yAxis?: AxisOptions;
-    series: readonly LineSeriesConfig[];
+    series: readonly (LineSeriesConfig | ScatterSeriesConfig)[];
   }
 
   export interface ChartGPUInstance {

@@ -1,3 +1,5 @@
+import { panelLayoutCallbacks } from "./panel-layout-actions";
+import { usesPairedSamples } from "../app/panel-content";
 import { settingsEntries } from "./settings";
 import { nextTheme } from "../app/themes";
 import { showThemePicker } from "./theme-picker";
@@ -362,18 +364,7 @@ export class AppShell {
           if (panelExisted) this.presentation.invalidate(id);
           this.afterLayoutChange();
         },
-        onSplitRight: (id) => {
-          this.workspace.splitPanelRight(id);
-          this.afterLayoutChange();
-        },
-        onSplitDown: (id) => {
-          this.workspace.splitPanelDown(id);
-          this.afterLayoutChange();
-        },
-        onMaximize: (id) => {
-          this.workspace.toggleMaximize(id);
-          this.afterLayoutChange();
-        },
+        ...panelLayoutCallbacks(this.workspace, () => this.afterLayoutChange()),
         onDropSignals: (id, paths) => {
           this.plotSignals(paths, id);
         },
@@ -2551,6 +2542,7 @@ export class AppShell {
       this.resolvedFor(panel),
       this.catalog,
       panel.color_axis,
+      usesPairedSamples(panel),
     );
   }
 

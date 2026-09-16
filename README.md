@@ -1,42 +1,10 @@
 # SignalScope
 
-Local workbench for exploring large engineering datasets as XY charts. SignalScope
-streams CSV, MCAP, HDF5/MAT v7.3, and Parquet data through a Rust data plane and
-renders it in a WebGPU-capable Chromium browser.
-
-Use each panel's **x:** control to search every loaded signal, or select a
-channel bundle to pair each run's Y with that run's X. **y: + add** adds a
-signal, channel bundle, or named set. Dragging a signal or bundle to the bottom
-X strip also assigns X. One X signal can serve multiple Y signals; bundle
-members match by source, with missing or ambiguous matches reported explicitly.
-Pairs must share an exact sample timebase; no interpolation is performed.
-The same signal can occupy both X and Y, producing the identity line `y = x`.
-
-Use **c:** to color each line along its length by another signal, a source-matched
-bundle, or time. The labeled horizontal scale lives in the legend and shares
-one range across the panel. When the legend is collapsed it remains visible
-as a compact plot inset; neither placement adds a plot gutter.
-The compact **axis** dropdown edits X, Y, and C ranges and labels together,
-with automatic or fixed limits and **Linear / Logarithmic (base 10)** scales
-per axis. Log scales use positive values: non-positive X/Y samples break lines,
-and non-positive C samples use a neutral color. **Axis equal** requires linear
-X and Y. **Flip horizontal** and **Flip vertical** independently reverse
-the displayed axes with either scale. Limits remain minimum-to-maximum in original
-units. Scales and flips persist in sessions and offline snapshots.
-For time X, **Fit data** fits the
-source-time extent and fixed limits follow the panel's linked-time setting.
-C members must share units and the paired sample timebase. Choose **none** to
-restore the saved categorical line colors. Color bindings and limits persist
-in sessions, PNG capture, and offline HTML snapshots.
-The legend's **Dim** control also applies with C enabled: background traces
-fade as the ensemble grows, focused traces draw above them, and hover brings
-the inspected trace to the front without changing its C values.
-
-CSV time columns stay available as ordinary signals. A recognized finite time
-header supplies the linked-time anchor; otherwise imports use row index instead
-of guessing from increasing measurements. Recipe time datasets and MCAP
-log timestamps (in seconds) also appear in the signal catalog. Axis bindings
-persist in sessions and captured bundle curves work in offline HTML exports.
+SignalScope is a local desktop and browser app for exploring large engineering
+datasets. Load CSV, MCAP, HDF5/MAT v7.3, or Parquet files, plot signals against time
+or each other, and compare runs across linked charts. Rust handles data processing
+and ChartGPU renders the plots. Save workspaces as sessions or share interactive
+HTML snapshots that work offline.
 
 ## Interactive demo
 
@@ -51,11 +19,6 @@ choose a version from [all release tags](https://github.com/tanged123/signalscop
 - Windows x64: `SignalScope-VERSION-windows-x64-setup.exe`
 - macOS Apple Silicon: `SignalScope-VERSION-mac-arm64.dmg`
 - Linux x64: `SignalScope-VERSION-linux-x64.AppImage` or the `.deb` package
-
-Release assets include `SHA256SUMS.txt` for verification. Rendering requires a
-WebGPU-capable system. Linux packages support the Ubuntu 22.04 glibc 2.35
-baseline and newer distributions.
-macOS packages use system libraries; Nix is only a build-time dependency.
 
 ## Build and run
 

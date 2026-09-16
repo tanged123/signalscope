@@ -26,8 +26,7 @@ test("shared presentation plane renders the demo workspace", async ({
   await expect(page.locator(".new-panel")).toHaveCount(0);
   await expect(page.locator(".formula-bar")).toBeHidden();
   await expect(page.locator(".formula-toggle")).toBeHidden();
-  await expect(page.locator(".panel-split-right")).toBeVisible();
-  await expect(page.locator(".panel-split-down")).toBeVisible();
+  await expect(page.locator(".panel-layout")).toBeVisible();
   await expect(page.getByLabel("Panel 1 panel")).toBeVisible();
   await expect(page.locator(".binding-chip")).toHaveCount(2);
   for (const name of await page.locator(".binding-chip").allTextContents()) {

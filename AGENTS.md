@@ -67,8 +67,9 @@ builds until implementation is complete. Report what actually ran.
 
 ## Product and architecture boundaries
 
-- SignalScope supports Cartesian2D Line2D plots with linked-time or explicit
+- SignalScope supports Cartesian2D Line2D and sampled Scatter2D plots with linked-time or explicit
   signal-X bindings ([ADR 0052](docs/adr/0052-typed-plot-families-and-explicit-x-line2d.md)).
+  [ADR 0066](docs/adr/0066-scatter-panels-and-creation.md) adds scatter and panel creation.
   Future plot types require deliberate schema and design work. Touch and mobile
   remain out of scope.
 - The Electron app is a thin lifecycle and presentation wrapper around
