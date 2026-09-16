@@ -1,4 +1,5 @@
 import { required } from "./dom";
+import { panelTypeOptions } from "./panel-type-options";
 import type { PanelContent } from "../generated/session";
 import { positionPanelPopover } from "./panel-menu";
 
@@ -28,17 +29,10 @@ export function showPanelLayoutMenu(
     </div>
     <div class="panel-creation-types" role="group" aria-label="Panel type">
       <div class="panel-config-title">PANEL TYPE</div>
-      <button type="button" data-type="line2d">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4v16h18M5 14l4-5 4 7 4-9 4 4"/></svg>
-        <span><strong>Time series</strong><small>Signals over time</small></span>
-      </button>
-      <button type="button" data-type="scatter2d">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4v16h18"/><circle cx="8" cy="14" r="1"/><circle cx="12" cy="9" r="1"/><circle cx="15" cy="13" r="1"/><circle cx="19" cy="6" r="1"/></svg>
-        <span><strong>Scatter</strong><small>One signal against another</small></span>
-      </button>
     </div>
     <div class="panel-creation-destination" aria-live="polite"></div>
     <button type="button" class="panel-creation-close">Close panel</button>`;
+  required(menu, ".panel-creation-types").append(panelTypeOptions());
   const buttons = [...menu.querySelectorAll<HTMLButtonElement>("button")];
   const placements = buttons.filter(
     (button) => button.dataset.position !== undefined,

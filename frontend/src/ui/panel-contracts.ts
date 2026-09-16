@@ -26,6 +26,7 @@ export interface PanelCallbacks {
   onClose(id: string): void;
   onSplitLeft?(id: string, content?: PanelContent): void;
   onMinimize?(id: string): void;
+  onSetEmptyPanelContent?(id: string, content: PanelContent): void;
   onSplitRight(id: string, content?: PanelContent): void;
   onSplitDown(id: string, content?: PanelContent): void;
   onMaximize(id: string): void;

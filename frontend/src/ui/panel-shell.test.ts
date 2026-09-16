@@ -21,6 +21,43 @@ function callbacks(): PanelShellCallbacks {
 }
 
 describe("PanelShell", () => {
+  it("keeps empty-panel choices and keyboard focus stable across selection and clears them for other states", () => {
+    const onSetEmptyPanelContent = vi.fn();
+    const shell = new PanelShell("panel-1", {
+      ...callbacks(),
+      onSetEmptyPanelContent,
+    });
+    document.body.append(shell.element);
+    shell.setStatus({
+      kind: "empty",
+      message: "Empty",
+      content: { kind: "line2d" },
+    });
+    const scatter = required<HTMLButtonElement>(
+      shell.slots.status,
+      '[data-type="scatter2d"]',
+    );
+    scatter.focus();
+    scatter.click();
+    expect(onSetEmptyPanelContent).toHaveBeenCalledWith("panel-1", {
+      kind: "scatter2d",
+    });
+    shell.setStatus({
+      kind: "empty",
+      message: "Empty",
+      content: { kind: "scatter2d" },
+    });
+    expect(document.activeElement).toBe(scatter);
+    expect(scatter.getAttribute("aria-pressed")).toBe("true");
+    shell.setStatus({ kind: "loading", message: "Loading" });
+    expect(shell.slots.status.querySelector("button")).toBeNull();
+    shell.setStatus({ kind: "empty", message: "No matching signals" });
+    expect(shell.slots.status.textContent).toBe("No matching signals");
+    shell.dispose();
+    scatter.click();
+    expect(onSetEmptyPanelContent).toHaveBeenCalledOnce();
+    shell.element.remove();
+  });
   it("provides stable shell anatomy and named content slots", () => {
     const shell = new PanelShell("panel-1", callbacks());
 

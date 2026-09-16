@@ -517,3 +517,41 @@
   outline: 1px solid var(--focus-ring);
   outline-offset: -2px;
 }
+
+.panel-empty-choice {
+  width: min(320px, calc(100% - 32px));
+  text-align: center;
+}
+.panel-empty-choice > strong {
+  color: var(--fg-1);
+  font-weight: 600;
+}
+.panel-empty-choice .panel-creation-types {
+  border: 0;
+  padding: 12px 0;
+}
+.panel-empty-choice button {
+  width: 100%;
+  pointer-events: auto;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  text-align: left;
+}
+.panel-empty-choice button:hover,
+.panel-empty-choice button[aria-pressed="true"] {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+.panel-empty-choice button[aria-pressed="true"]::after {
+  content: "✓";
+  margin-left: auto;
+  color: var(--fg-1);
+}
+.panel-empty-choice button:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.panel-empty-choice p {
+  margin: 0;
+  line-height: 1.5;
+}

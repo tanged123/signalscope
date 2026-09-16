@@ -28,6 +28,15 @@ minimize/maximize controls restore the grid or expand the panel, with the
 unavailable action disabled. Closing retains existing workspace behavior and
 remains available in the dropdown. Only implemented types appear in the menu.
 
+Empty panels, including those created with N in a new workspace, offer the
+same illustrated Time series/Scatter choices in the plot area. Time series
+starts selected so direct signal drops still work. Choosing a type updates the
+existing panel in place, retaining ID, layout, and axis settings. The choice
+remains available until a binding is assigned. `app/panel-content.ts` rejects
+changes to bound panels and no-op selections; WorkspaceModel publishes successful
+changes through the existing revision/history/autosave path. PanelShell retains
+the choice buttons across updates so keyboard focus survives selection.
+
 Session version 33 adds tagged PanelContent with line2d and scatter2d variants.
 Version 32 migrates to line2d. Both concrete types share the existing Cartesian
 axis, bindings, legend and annotation state; no speculative map or raster
@@ -86,6 +95,8 @@ to passing the selected content, composing a left split through the same admissi
 helper, and retaining revision publication. New menu, query, and rendering behavior lives in
 their owning modules. This does not clear the remaining legend/shell size debt
 or permit additional behavior in those oversized owners.
+The empty-panel follow-up permits only a status content input in PanelView and
+a WorkspaceModel method delegating to the content guard and revision owner.
 
 ## Alternatives and tradeoffs
 

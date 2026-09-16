@@ -1,4 +1,5 @@
 import { createPanelState } from "./panel-defaults";
+import { setEmptyPanelContent } from "./panel-content";
 import { splitPanel } from "./panel-layout";
 import type { PanelContent } from "../generated/session";
 import type {
@@ -355,6 +356,14 @@ export class WorkspaceModel {
     this.activeTab().focused_panel_id = panel.id;
     this.touch(true);
     return panel;
+  }
+
+  setEmptyPanelContent(id: string, content: PanelContent): boolean {
+    const panel = this.panel(id);
+    if (panel === undefined || !setEmptyPanelContent(panel, content))
+      return false;
+    this.touch(true);
+    return true;
   }
 
   splitPanelLeft(

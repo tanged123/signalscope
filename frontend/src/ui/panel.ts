@@ -748,6 +748,7 @@ export class PanelView {
       this.shell.setStatus({
         kind: "empty",
         message: "Empty panel — drag a signal here.",
+        content: state.bindings.length === 0 ? state.content : undefined,
       });
     } else if (this.gpu === null) {
       this.shell.setStatus({

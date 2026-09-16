@@ -1,5 +1,7 @@
 import type { PanelContent } from "../generated/session";
 import { showPanelLayoutMenu } from "./panel-layout-menu";
+import { panelTypeOptions } from "./panel-type-options";
+import { required } from "./dom";
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const SET_DRAG_TYPE = "application/x-signalscope-set";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
@@ -17,7 +19,7 @@ export interface PanelShellSlots {
 export type PanelShellStatus =
   | { kind: "ready" }
   | { kind: "loading"; message: string }
-  | { kind: "empty"; message: string }
+  | { kind: "empty"; message: string; content?: PanelContent | undefined }
   | { kind: "unavailable"; message: string }
   | { kind: "error"; message: string };
 
@@ -26,6 +28,7 @@ export interface PanelShellCallbacks {
   onClose: (id: string) => void;
   onSplitLeft?: (id: string, content?: PanelContent) => void;
   onMinimize?: (id: string) => void;
+  onSetEmptyPanelContent?: (id: string, content: PanelContent) => void;
   onSplitRight: (id: string, content?: PanelContent) => void;
   onSplitDown: (id: string, content?: PanelContent) => void;
   onMaximize: (id: string) => void;
@@ -154,6 +157,25 @@ export class PanelShell {
   setStatus(status: PanelShellStatus): void {
     const slot = this.slots.status;
     slot.hidden = status.kind === "ready";
+    if (status.kind === "empty" && status.content !== undefined) {
+      if (!slot.querySelector(".panel-empty-choice")) {
+        slot.innerHTML = `<div class="panel-empty-choice">
+          <strong>Choose a panel type</strong>
+          <div class="panel-creation-types" role="group" aria-label="Panel type"></div>
+          <p>Then drag signals here, or add them from Plot settings.</p>
+        </div>`;
+        required(slot, ".panel-creation-types").append(panelTypeOptions());
+      }
+      slot.dataset.state = "empty";
+      for (const button of slot.querySelectorAll<HTMLButtonElement>(
+        "[data-type]",
+      ))
+        button.setAttribute(
+          "aria-pressed",
+          String(button.dataset.type === status.content.kind),
+        );
+      return;
+    }
     if (status.kind === "ready") {
       delete slot.dataset.state;
       slot.textContent = "";
@@ -175,6 +197,14 @@ export class PanelShell {
   }
 
   private bind(): void {
+    this.slots.status.addEventListener("click", (event) => {
+      if (this.disposed || !(event.target instanceof Element)) return;
+      const kind =
+        event.target.closest<HTMLButtonElement>("button[data-type]")?.dataset
+          .type;
+      if (kind === "line2d" || kind === "scatter2d")
+        this.callbacks.onSetEmptyPanelContent?.(this.id, { kind });
+    });
     this.element.addEventListener("pointerdown", () => {
       if (!this.disposed) this.callbacks.onFocus(this.id);
     });
