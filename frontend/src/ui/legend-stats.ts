@@ -146,12 +146,13 @@ export function statCell(
   value: number | null,
   column: StatColumn,
   unit: string | null = null,
+  exactValue: string | null = null,
 ): HTMLElement {
   const cell = document.createElement("span");
   cell.className = "plot-stat-cell";
   cell.dataset.column = column;
   if (unit !== null && unit !== "") cell.dataset.unit = unit;
-  setStatCellValue(cell, value, unit);
+  setStatCellValue(cell, value, unit, exactValue);
   return cell;
 }
 
@@ -159,8 +160,9 @@ export function setStatCellValue(
   cell: HTMLElement,
   value: number | null,
   unit: string | null,
+  exactValue: string | null = null,
 ): void {
-  cell.replaceChildren(formatStatValue(value));
+  cell.replaceChildren(exactValue ?? formatStatValue(value));
   if (value !== null && unit !== null && unit !== "") {
     const suffix = document.createElement("span");
     suffix.className = "plot-stat-unit";

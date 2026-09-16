@@ -74,7 +74,7 @@ are recorded in [ADRs](adr/README.md).
 
 ## Deliberate limits
 
-- Histogram, FFT-specific UI, spectrogram, contour, and 3D
+- FFT-specific UI, spectrogram, contour, and 3D
   presentation are not current capabilities. ADR 0052 defines typed
   plot-family seams; each future family needs a current data contract and an
   ADR.
@@ -86,6 +86,34 @@ are recorded in [ADRs](adr/README.md).
   exported snapshots.
 
 ## Next work
+
+### Planned 2D analysis additions
+
+The requested [incremental 2D analysis plan](2d-analysis-plan.md) details proposed
+scope, numerical contracts, ownership, interactions, and validation. It is
+future work, not an accepted replacement for current plot-family contracts.
+Implement and refine one increment at a time in this order:
+
+1. Histogram with exact source-window counts and shared bin edges.
+2. CDF/exceedance with explicit threshold and percentile semantics.
+3. Spectrum: amplitude first, then Welch power spectral density.
+4. Rolling mean/RMS/standard deviation through derived time series.
+5. Autocorrelation with explicit lag and normalization semantics.
+6. Cross-correlation with ordered signal pairs and a tested delay convention.
+7. Lag plots using real paired observations and sampled Scatter2D rendering.
+8. Box-and-whisker comparisons with exact summaries and stable categories.
+
+Histogram's data path, panel controls, persistence, and exact offline capture are
+implemented under [ADR 0067](adr/0067-exact-histogram-panels.md). Dedicated keyboard
+bin traversal, annotation delta readouts, and large-window timing measurements
+remain before closing its full planned acceptance gate. The other increments
+are pending. Each is complete when its numerical invariants,
+typed data path, keyboard-accessible UI, save/restore, and offline result
+capture pass the plan's completion gate. Existing derivative/integral and
+phase-portrait conveniences are audited separately; only missing behavior is
+added. Spectrograms and density heatmaps remain later grid/raster work.
+
+### Continuing engineering work
 
 Prioritize measured, user-visible work in this order:
 

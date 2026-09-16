@@ -57,12 +57,18 @@ export class PanelAxes {
 
   update(state: PanelState): void {
     this.state = state;
+    const histogram = state.content.kind === "histogram";
     const xLabel = xAxisLabel(state.x_axis, this.actions.catalog());
     const x = required<HTMLButtonElement>(this.element, ".panel-x-axis");
-    x.textContent = `x: ${xLabel} ▾`;
-    x.title = `X axis: ${xLabel}`;
-    x.setAttribute("aria-label", `X axis: ${xLabel}`);
-    x.hidden = false;
+    x.textContent = histogram ? "x: value" : `x: ${xLabel} ▾`;
+    x.title = histogram
+      ? "Histogram X axis is the source signal value"
+      : `X axis: ${xLabel}`;
+    x.setAttribute(
+      "aria-label",
+      histogram ? "X axis: source value" : `X axis: ${xLabel}`,
+    );
+    x.disabled = histogram;
     const cLabel =
       state.color_axis == null
         ? "none"
@@ -71,6 +77,7 @@ export class PanelAxes {
     c.textContent = `color: ${cLabel} ▾`;
     c.title = `Color axis: ${cLabel}`;
     c.setAttribute("aria-label", `Color axis: ${cLabel}`);
+    c.disabled = histogram;
   }
 
   close(): void {
@@ -88,7 +95,8 @@ export class PanelAxes {
 
   private open(axis: "x" | "y" | "c"): void {
     const state = this.state;
-    if (state === null) return;
+    if (state === null || (state.content.kind === "histogram" && axis !== "y"))
+      return;
     this.close();
     this.actions.beforeOpen();
     this.closeMenu = showAxisPicker(

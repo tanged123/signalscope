@@ -35,7 +35,7 @@ test("position stays open, creation uses the selected type, Escape returns focus
   expect(document.activeElement).toBe(anchor);
   cleanup();
   cleanup = showPanelLayoutMenu(host, anchor, "Panel", actions);
-  expect(host.querySelectorAll("svg")).toHaveLength(2);
+  expect(host.querySelectorAll("svg")).toHaveLength(3);
   document.activeElement?.dispatchEvent(
     new KeyboardEvent("keydown", { key: "End", bubbles: true }),
   );

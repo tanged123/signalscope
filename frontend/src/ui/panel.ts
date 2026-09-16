@@ -65,6 +65,7 @@ import { YAxisPolicy } from "../render/y-axis";
 import { required } from "./dom";
 import { PanelShell } from "./panel-shell";
 import { PanelAnnotationState } from "./panel-annotations";
+import { histogramQualityText } from "./panel-histogram";
 import {
   bindLegendDrag,
   floatLegend,
@@ -308,6 +309,8 @@ export class PanelView {
   readonly element: HTMLElement;
   private readonly shell: PanelShell;
   private readonly overlay: HTMLCanvasElement;
+  private readonly histogramQualityElement: HTMLElement;
+  private histogramPinButton: HTMLButtonElement | null = null;
   private readonly chartHostElement: HTMLElement;
   private readonly overlayRenderer: OverlayRenderer;
   private chartHost: ChartHost | null = null;
@@ -349,6 +352,7 @@ export class PanelView {
   private plotLegendAnchor: LegendAnchor | null = null;
   private plotLegendDock: LegendDock | null = null;
   private lastLegendLayoutKey: string | null = null;
+  private exactStatsByPath = new Map<string, Map<string, string>>();
 
   private get annotationUi(): PanelAnnotationState {
     return (this.annotationState ??= new PanelAnnotationState());
@@ -377,6 +381,10 @@ export class PanelView {
         this.annotationUi.selectedIds.clear();
         callbacks.onClearAnnotations?.(this.id);
       },
+      setHistogramBins: (count) =>
+        callbacks.onSetHistogramBins?.(this.id, count),
+      canSetHistogramBins: () =>
+        callbacks.canSetHistogramBins?.(this.id) ?? true,
       beforeOpen: () => this.axes.close(),
     });
     this.chartHostElement = document.createElement("div");
@@ -387,6 +395,14 @@ export class PanelView {
     this.overlay.className = "overlay-canvas";
     this.overlay.setAttribute("aria-hidden", "true");
     this.shell.appendContent(this.overlay);
+    this.histogramQualityElement = document.createElement("div");
+    this.histogramQualityElement.className = "plot-histogram-quality";
+    this.histogramQualityElement.hidden = true;
+    this.histogramQualityElement.setAttribute(
+      "aria-label",
+      "Histogram sample quality",
+    );
+    this.shell.appendContent(this.histogramQualityElement);
     this.overlayRenderer = new OverlayRenderer(this.overlay);
     this.bind();
     this.axes = new PanelAxes(this.element, {
@@ -734,6 +750,7 @@ export class PanelView {
     this.updateBindings(rendered);
     this.pruneAnnotationUiState(rendered);
     this.updatePlotLegend(rendered);
+    this.updateHistogramQuality(rendered, this.lastData);
     const annotations = this.resolvedAnnotations(rendered);
     this.drawOverlay(annotations);
     if (
@@ -812,6 +829,7 @@ export class PanelView {
     this.hitAdapter = null;
     this.updateLegendValues();
     const elapsed = this.renderForMode(rendered, data, window);
+    this.updateHistogramQuality(rendered, data);
     this.hitAdapter =
       (this.preparedPlot as PreparedPlot | null)?.hitAdapter ?? null;
     this.interactions.setPolicy(
@@ -856,12 +874,14 @@ export class PanelView {
     const { plotted } = family;
     this.preparedPlot = family.plot;
     if (plotted.length === 0) {
-      this.chartHostElement.hidden = true;
-      this.shell.setStatus({
-        kind: "empty",
-        message: "Choose at least one Y signal.",
-      });
-      return 0;
+      if (data.kind !== "histogram") {
+        this.chartHostElement.hidden = true;
+        this.shell.setStatus({
+          kind: "empty",
+          message: "Choose at least one Y signal.",
+        });
+        return 0;
+      }
     }
     this.shell.setStatus({ kind: "ready" });
     const seriesKey = state.series.map((series) => series.path).join("\u0000");
@@ -878,6 +898,38 @@ export class PanelView {
       return 0;
     }
     return this.chartHost.render(request);
+  }
+
+  private updateHistogramQuality(
+    state: RenderPanelState,
+    data: PanelLineResponse | null,
+  ): void {
+    const element = this.histogramQualityElement;
+    const text = histogramQualityText(state.content, state.series, data);
+    element.replaceChildren();
+    this.histogramPinButton = null;
+    if (text !== null) {
+      const label = document.createElement("span");
+      label.textContent = text;
+      const pin = document.createElement("button");
+      pin.className = "plot-histogram-pin";
+      pin.type = "button";
+      pin.textContent = "pin bin";
+      pin.title = "Pin the hovered histogram bin";
+      pin.disabled = this.hoverTip === null;
+      pin.addEventListener("click", () => {
+        if (this.hoverTip !== null)
+          this.callbacks.onPinAnnotation(this.id, this.hoverTip);
+      });
+      element.append(label, pin);
+      this.histogramPinButton = pin;
+    }
+    element.hidden = text === null;
+  }
+
+  private updateHistogramPinButton(): void {
+    if (this.histogramPinButton !== null)
+      this.histogramPinButton.disabled = this.hoverTip === null;
   }
 
   private resolvePlotRanges(
@@ -942,10 +994,20 @@ export class PanelView {
   async capturePlot(): Promise<{
     plot: HTMLCanvasElement;
     overlay: HTMLCanvasElement;
+    windowNote: string | null;
+    quality: string | null;
   }> {
     const host = this.chartHost ?? (await this.chartHostReady);
     if (host === null) throw new Error("chart host unavailable");
-    return { plot: await host.capture(), overlay: this.overlay };
+    return {
+      plot: await host.capture(),
+      overlay: this.overlay,
+      windowNote: this.preparedPlot?.interaction.windowNote ?? null,
+      quality: this.histogramQualityElement.hidden
+        ? null
+        : (this.histogramQualityElement.querySelector("span")?.textContent ??
+          null),
+    };
   }
 
   dispose(): void {
@@ -1043,6 +1105,7 @@ export class PanelView {
       const changed = this.annotationUi.hoveredId !== annotationHit.id;
       this.annotationUi.hoveredId = annotationHit.id;
       this.hoverTip = null;
+      this.updateHistogramPinButton();
       this.setEmphasis(annotationHit.path);
       if (changed) {
         this.drawOverlay();
@@ -1065,6 +1128,7 @@ export class PanelView {
             { x: offsetX, y: offsetY },
             14,
           ) ?? null);
+    this.updateHistogramPinButton();
     this.setEmphasis(hit.path);
     this.drawOverlay();
   }
@@ -1072,6 +1136,7 @@ export class PanelView {
   private clearHover(): void {
     const hadAnnotation = this.annotationUi.hoveredId !== null;
     this.hoverTip = null;
+    this.updateHistogramPinButton();
     this.annotationUi.hoveredId = null;
     this.setEmphasis(null);
     if (hadAnnotation && this.lastState !== null)
@@ -1428,8 +1493,8 @@ export class PanelView {
       header.append(undock);
       legend.replaceChildren(
         header,
-        legendBulkActions(state.series, (action) =>
-          this.callbacks.onSeriesAction(this.id, action),
+        legendBulkActions(state.series, (action, scope) =>
+          this.callbacks.onSeriesAction(this.id, action, scope),
         ),
         legendColorControls(state, this.plotLegendEncodingRow(state), () =>
           this.axes.openColor(),
@@ -1498,8 +1563,8 @@ export class PanelView {
       header,
       ...(state.legend_state === "roster" || state.show_stats
         ? [
-            legendBulkActions(state.series, (action) =>
-              this.callbacks.onSeriesAction(this.id, action),
+            legendBulkActions(state.series, (action, scope) =>
+              this.callbacks.onSeriesAction(this.id, action, scope),
             ),
             legendColorControls(state, this.plotLegendEncodingRow(state), () =>
               this.axes.openColor(),
@@ -1958,12 +2023,17 @@ export class PanelView {
       x.className = "plot-tip-x";
       const plottedX = annotation.pinned_x ?? annotation.anchor;
       x.textContent = formatValue(plottedX);
+      const resolved = this.preparedPlot?.resolveAnnotation(annotation);
+      const exactValue =
+        state.content.kind === "histogram"
+          ? (resolved?.exactValue ?? null)
+          : null;
       const value = document.createElement("span");
       value.className = "plot-tip-value";
-      value.textContent = formatValue(annotation.pinned_value);
+      value.textContent = exactValue ?? formatValue(annotation.pinned_value);
       const reading = document.createElement("span");
       reading.className = "plot-tip-reading";
-      reading.textContent = `${formatValue(plottedX)} · ${formatValue(annotation.pinned_value)}`;
+      reading.textContent = `${formatValue(plottedX)} · ${exactValue ?? formatValue(annotation.pinned_value)}`;
       const actions = document.createElement("span");
       actions.className = "plot-tip-actions";
       const locate = document.createElement("button");
@@ -2312,7 +2382,14 @@ export class PanelView {
       ),
     );
     for (const column of columns) {
-      aggregateRow.append(statCell(aggregate[column], column));
+      aggregateRow.append(
+        statCell(
+          aggregate[column],
+          column,
+          null,
+          column === "n" ? this.exactAggregateCount(rows) : null,
+        ),
+      );
     }
 
     const body = document.createElement("div");
@@ -2396,6 +2473,9 @@ export class PanelView {
           row.values[column],
           column,
           mixedUnits && column !== "n" ? units.get(row.series.path) : null,
+          column === "n"
+            ? (this.exactStatsByPath.get(row.series.path)?.get("n") ?? null)
+            : null,
         );
         if (column === "cursor") cell.dataset.path = row.series.path;
         element.append(cell);
@@ -2427,19 +2507,40 @@ export class PanelView {
 
   private legendStatsByPath(): Map<string, LegendStatValues> {
     const values = new Map<string, LegendStatValues>();
+    this.exactStatsByPath = new Map();
     for (const group of this.preparedPlot?.stats() ?? []) {
       const row = emptyLegendStats();
+      const exact = new Map<string, string>();
       for (const item of group.items) {
         if (item.label === "min") row.min = item.value;
         else if (item.label === "max") row.max = item.value;
         else if (item.label === "mean") row.mean = item.value;
         else if (item.label === "rms") row.rms = item.value;
         else if (item.label === "n") row.n = item.value;
+        if (item.exactValue !== undefined)
+          exact.set(item.label, item.exactValue);
       }
+      if (exact.size > 0) this.exactStatsByPath.set(group.label, exact);
       row.cursor = this.valueAtCursor(group.label);
       values.set(group.label, row);
     }
     return values;
+  }
+
+  private exactAggregateCount(
+    rows: readonly { series: RenderSeries }[],
+  ): string | null {
+    let total = 0n;
+    for (const row of rows) {
+      const exact = this.exactStatsByPath.get(row.series.path)?.get("n");
+      if (exact === undefined) return null;
+      try {
+        total += BigInt(exact);
+      } catch {
+        return null;
+      }
+    }
+    return rows.length === 0 ? null : total.toString();
   }
 
   private valueAtCursor(path: string): number | null {
@@ -2471,12 +2572,16 @@ export class PanelView {
         return [
           series.path,
           ...columns.map((column) => {
-            if (row[column] === null) return "";
+            const exact =
+              column === "n"
+                ? (this.exactStatsByPath.get(series.path)?.get("n") ?? null)
+                : null;
+            if (row[column] === null && exact === null) return "";
             const unit =
               mixedUnits && column !== "n"
                 ? (units.get(series.path) ?? null)
                 : null;
-            return `${String(row[column])}${unit === null ? "" : ` ${unit}`}`;
+            return `${exact ?? String(row[column])}${unit === null ? "" : ` ${unit}`}`;
           }),
         ]
           .map(csvCell)

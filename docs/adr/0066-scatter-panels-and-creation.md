@@ -1,6 +1,10 @@
 # ADR 0066: Scatter panels and panel creation
 
 - Status: Accepted
+
+Histogram creation and distribution presentation are added by
+[ADR 0067](0067-exact-histogram-panels.md).
+
 - Date: 2026-09-12
 - Amends: [ADR 0052](0052-typed-plot-families-and-explicit-x-line2d.md),
   [ADR 0065](0065-panel-toolbar-groups.md), and the composition-only size

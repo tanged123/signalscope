@@ -1,5 +1,5 @@
 import { required } from "./dom";
-import { panelTypeOptions } from "./panel-type-options";
+import { panelContentForType, panelTypeOptions } from "./panel-type-options";
 import type { PanelContent } from "../generated/session";
 import { positionPanelPopover } from "./panel-menu";
 
@@ -68,8 +68,8 @@ export function showPanelLayoutMenu(
         } else {
           close(true);
           const kind = button.dataset.type;
-          if (kind === "line2d" || kind === "scatter2d")
-            actions.create(position, { kind });
+          const content = panelContentForType(kind ?? "");
+          if (content !== null) actions.create(position, content);
           else actions.close();
         }
       },

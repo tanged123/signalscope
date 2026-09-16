@@ -1,6 +1,6 @@
 {
   "name": "@signalscope/desktop",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "description": "SignalScope time-series analysis workbench",
   "author": "SignalScope contributors",
   "desktopName": "SignalScope.desktop",

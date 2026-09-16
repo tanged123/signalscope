@@ -1,5 +1,8 @@
 import { createPanelState } from "./panel-defaults";
-import { setEmptyPanelContent } from "./panel-content";
+import {
+  validateHistogramBinCount,
+  setEmptyPanelContent,
+} from "./panel-content";
 import { splitPanel } from "./panel-layout";
 import type { PanelContent } from "../generated/session";
 import type {
@@ -33,6 +36,7 @@ import {
   applyPanelSeriesAction,
   toggleSeriesVisibility,
   type PanelSeriesAction,
+  type PanelSeriesScope,
 } from "./panel-series-actions";
 
 const MIN_FRACTION = 0.1;
@@ -440,10 +444,11 @@ export class WorkspaceModel {
     panelId: string,
     refs: readonly SeriesRef[],
     action: PanelSeriesAction,
+    scope: PanelSeriesScope = "all",
   ): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
-    applyPanelSeriesAction(panel, refs, action);
+    applyPanelSeriesAction(panel, refs, action, scope);
     this.touch(true);
   }
 
@@ -504,6 +509,7 @@ export class WorkspaceModel {
 
   setPanelXAxis(panelId: string, xAxis: SampleAxisSource): void {
     const panel = this.panel(panelId);
+    if (panel?.content.kind === "histogram") return;
     if (panel === undefined) return;
     if (setXAxis(panel, xAxis)) this.touch(true);
   }
@@ -514,6 +520,7 @@ export class WorkspaceModel {
   ): ReturnType<typeof setColorAxis> {
     const panel = this.panel(panelId);
     if (panel === undefined) return false;
+    if (panel.content.kind === "histogram") return false;
     const change = setColorAxis(panel, axis);
     if (change !== false) this.touch(change === "binding");
     return change;
@@ -606,6 +613,15 @@ export class WorkspaceModel {
     const panel = this.panel(panelId);
     if (panel === undefined || !Number.isFinite(width) || width <= 0) return;
     panel.line_width = width;
+    this.touch(true);
+  }
+
+  setHistogramBinCount(panelId: string, value: number): void {
+    const panel = this.panel(panelId);
+    if (panel === undefined || panel.content.kind !== "histogram") return;
+    const next = validateHistogramBinCount(value);
+    if (panel.content.bin_count === next) return;
+    panel.content = { ...panel.content, bin_count: next };
     this.touch(true);
   }
 

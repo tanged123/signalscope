@@ -31,6 +31,9 @@ pub struct AppContext {
     pub state: Arc<std::sync::Mutex<DataState>>,
     pub gate: Arc<RestoreGate>,
     pub jobs: Arc<BatchJobs>,
+    /// Limits concurrent exact histogram scans so several large panels do not
+    /// materialize overlapping page ranges at once.
+    pub histogram_scans: Arc<tokio::sync::Semaphore>,
     pub dialogs: Arc<dyn DialogProvider>,
 }
 
@@ -90,6 +93,7 @@ impl AppContext {
             state: Arc::new(std::sync::Mutex::new(data)),
             gate: Arc::new(RestoreGate::default()),
             jobs: Arc::new(jobs),
+            histogram_scans: Arc::new(tokio::sync::Semaphore::new(2)),
             dialogs: Arc::new(Native),
         }
     }
@@ -130,6 +134,7 @@ pub fn build_router(ctx: AppContext) -> Router {
         .route("/list_signals", post(api::list_signals))
         .route("/query_tiles_bin", post(api::query_tiles_bin))
         .route("/query_line2d_bin", post(api::query_line2d_bin))
+        .route("/query_histogram", post(api::query_histogram))
         .route("/query_samples", post(api::query_samples))
         .route("/create_derived", post(api::create_derived))
         .route("/create_derived_bundle", post(api::create_derived_bundle))

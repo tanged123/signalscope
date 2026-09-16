@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const SESSION_SCHEMA_VERSION: u32 = 33;
+pub const SESSION_SCHEMA_VERSION: u32 = 34;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -247,6 +247,10 @@ pub struct Annotation {
     pub pinned_value: f64,
     pub label: String,
     pub offset: [f64; 2],
+    #[serde(default)]
+    pub histogram_window: Option<[f64; 2]>,
+    #[serde(default)]
+    pub histogram_bin_count: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -384,4 +388,5 @@ pub struct Session {
 pub enum PanelContent {
     Line2d,
     Scatter2d,
+    Histogram { bin_count: u32 },
 }

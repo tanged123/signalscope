@@ -534,6 +534,45 @@ pub struct BakedLine2D {
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct HistogramRequest {
+    pub request_id: String,
+    #[serde(with = "u64_vec_string")]
+    pub signal_ids: Vec<u64>,
+    pub window: TimeWindow,
+    pub bin_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct HistogramSeries {
+    #[serde(with = "u64_string")]
+    pub signal_id: u64,
+    pub signal_path: String,
+    #[serde(default)]
+    pub unit: Option<String>,
+    #[serde(with = "u64_vec_string")]
+    pub counts: Vec<u64>,
+    #[serde(with = "u64_string")]
+    pub finite_count: u64,
+    #[serde(with = "u64_string")]
+    pub excluded_count: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct HistogramResponse {
+    pub request_id: String,
+    pub window: TimeWindow,
+    pub edges: Vec<f64>,
+    pub series: Vec<HistogramSeries>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BakedHistogram {
+    pub panel_id: String,
+    pub bin_count: u32,
+    pub response: HistogramResponse,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct SnapshotManifest {
     pub session_json: String,
     #[serde(default)]
@@ -541,4 +580,6 @@ pub struct SnapshotManifest {
     pub signals: Vec<BakedSignal>,
     #[serde(default)]
     pub line2d: Option<Vec<BakedLine2D>>,
+    #[serde(default)]
+    pub histograms: Option<Vec<BakedHistogram>>,
 }

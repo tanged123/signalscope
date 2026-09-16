@@ -1,3 +1,7 @@
+import {
+  histogramFamily,
+  type HistogramPanelResponse,
+} from "../app/histogram-family";
 import { line2dFamily } from "../app/line2d-family";
 import type { PanelLineResponse } from "../app/line-presentation-controller";
 import type { Range } from "../app/plot-math";
@@ -26,19 +30,30 @@ export function preparePanelRender(
   emphasizePaths: ReadonlySet<string> | null,
 ) {
   const palette = resolvePalette();
-  const family = line2dFamily(data).prepare({
-    primitive: state.content.kind === "scatter2d" ? "points" : "line",
-    colorCount: palette.series.length,
-    contour: palette.contour,
-    series: state.series,
-    window,
-    axisStyle: state.axis_style,
-    xLabel: state.x_label,
-    yLabel: state.y_label,
-    colorAxis: state.color_axis,
-    xScale: state.x_scale ?? "linear",
-    yScale: state.y_scale ?? "linear",
-  });
+  const family =
+    data.kind === "histogram"
+      ? histogramFamily(data as HistogramPanelResponse).prepare({
+          series: state.series,
+          colorCount: palette.series.length,
+          axisStyle: state.axis_style,
+          xLabel: state.x_label,
+          yLabel: state.y_label,
+          xScale: state.x_scale ?? "linear",
+          yScale: state.y_scale ?? "linear",
+        })
+      : line2dFamily(data).prepare({
+          primitive: state.content.kind === "scatter2d" ? "points" : "line",
+          colorCount: palette.series.length,
+          contour: palette.contour,
+          series: state.series,
+          window,
+          axisStyle: state.axis_style,
+          xLabel: state.x_label,
+          yLabel: state.y_label,
+          colorAxis: state.color_axis,
+          xScale: state.x_scale ?? "linear",
+          yScale: state.y_scale ?? "linear",
+        });
   const bySeries = new Map(state.series.map((series) => [series.path, series]));
   const styles: SeriesStroke[] = family.plotted.map((item) => {
     const series = bySeries.get(item.signalPath);
@@ -62,7 +77,8 @@ export function preparePanelRender(
     plotted: family.plotted,
     makeRequest: (ranges: { x: Range; y: Range }): ChartRenderRequest => ({
       ...family.makeInput(ranges, styles),
-      axisEqual: state.axis_equal === true,
+      axisEqual:
+        state.content.kind !== "histogram" && state.axis_equal === true,
       xReversed: state.x_reversed === true,
       yReversed: state.y_reversed === true,
       emphasisIndices,

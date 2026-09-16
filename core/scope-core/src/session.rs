@@ -83,10 +83,14 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
     // with deny_unknown_fields. Preserve the time/signal correlation here.
     for tab in current["tabs"].as_array().into_iter().flatten() {
         for panel in tab["panels"].as_array().into_iter().flatten() {
-            if panel["content"]
-                .as_object()
-                .is_none_or(|content| content.len() != 1)
-            {
+            if panel["content"].as_object().is_none_or(|content| {
+                content.len()
+                    != if panel["content"]["kind"] == "histogram" {
+                        2
+                    } else {
+                        1
+                    }
+            }) {
                 return Err(SessionError::Json(serde::de::Error::custom(
                     "invalid panel content",
                 )));
@@ -104,6 +108,7 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
     }
     let session: Session = serde_json::from_value(current)?;
     for panel in session.tabs.iter().flat_map(|tab| &tab.panels) {
+        validate_histogram_settings(panel)?;
         for (scale, range) in [
             (panel.x_scale, panel.x_range),
             (panel.y_scale, panel.y_range),
@@ -146,6 +151,34 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
     Ok(session)
 }
 
+fn validate_histogram_settings(panel: &PanelState) -> Result<(), SessionError> {
+    if let PanelContent::Histogram { bin_count } = panel.content {
+        if !(1..=256).contains(&bin_count)
+            || !matches!(panel.x_axis, SampleAxisSource::Time)
+            || panel.color_axis.is_some()
+            || panel.axis_equal == Some(true)
+        {
+            return Err(SessionError::Json(serde::de::Error::custom(
+                "invalid histogram settings",
+            )));
+        }
+    }
+    for annotation in &panel.annotations {
+        if annotation
+            .histogram_window
+            .is_some_and(|[t0, t1]| !t0.is_finite() || !t1.is_finite() || t0 > t1)
+            || annotation
+                .histogram_bin_count
+                .is_some_and(|count| !(1..=256).contains(&count))
+        {
+            return Err(SessionError::Json(serde::de::Error::custom(
+                "invalid histogram annotation provenance",
+            )));
+        }
+    }
+    Ok(())
+}
+
 type Migration = fn(serde_json::Value) -> serde_json::Value;
 
 const MIGRATIONS: &[(u32, Migration)] = &[
@@ -160,7 +193,13 @@ const MIGRATIONS: &[(u32, Migration)] = &[
     (30, migrate_v30),
     (31, migrate_v31),
     (32, migrate_v32),
+    (33, migrate_v33),
 ];
+
+fn migrate_v33(mut value: serde_json::Value) -> serde_json::Value {
+    value["schema_version"] = 34.into();
+    value
+}
 
 fn migrate_v29(mut value: serde_json::Value) -> serde_json::Value {
     value["schema_version"] = 30.into();

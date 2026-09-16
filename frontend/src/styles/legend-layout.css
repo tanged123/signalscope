@@ -84,6 +84,40 @@
   touch-action: none;
 }
 
+.plot-histogram-quality {
+  position: absolute;
+  z-index: 2;
+  bottom: 7px;
+  left: 8px;
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  padding: 2px 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--fg-3);
+  font: var(--ui-caption-size) var(--font-plot);
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plot-histogram-pin {
+  flex: none;
+  padding: 1px 4px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-3);
+  color: var(--fg-2);
+  font: inherit;
+}
+
+.plot-histogram-pin:disabled {
+  opacity: 0.55;
+}
+
 .plot-wrap.legend-rail[data-legend-dock="right"] .chart-host,
 .plot-wrap.legend-rail[data-legend-dock="right"] .overlay-canvas,
 .plot-wrap.legend-rail[data-legend-dock="right"] .panel-empty {

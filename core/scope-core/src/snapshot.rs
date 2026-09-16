@@ -9,8 +9,10 @@ use crate::line2d::{Line2dError, LinePyramid};
 use crate::pyramid::Pyramid;
 use crate::session::{LinkedTime, PanelState, Session};
 mod bindings;
+mod histogram;
 use crate::store::{Signal, SignalId, SignalStore, SourceKey};
 use bindings::{line_combinations, panel_signal_ids};
+use histogram::HistogramPlan;
 use scope_protocol::{
     BakedLine2D, BakedLine2DLevel, BakedSignal, ExportFidelity, ExportRange, ExportSelection,
     SignalSummary, SnapshotManifest,
@@ -54,6 +56,15 @@ pub struct LinePlan<'a> {
     pub levels: Vec<LineLevelPlan>,
 }
 
+pub use histogram::HistogramCapture;
+
+pub use histogram::bake_owned as bake_histograms_owned;
+
+#[must_use]
+pub fn clone_histogram_captures(plan: &ExportPlan) -> Vec<HistogramCapture> {
+    histogram::clone_captures(&plan.histograms)
+}
+
 impl SignalPlan<'_> {
     #[must_use]
     pub fn finest_level(&self) -> usize {
@@ -64,6 +75,7 @@ impl SignalPlan<'_> {
 pub struct ExportPlan<'a> {
     pub signals: Vec<SignalPlan<'a>>,
     pub lines: Vec<LinePlan<'a>>,
+    pub histograms: Vec<HistogramPlan<'a>>,
     pub series_total: u64,
     pub series_decimated: u64,
     pub series_full_rate: u64,
@@ -92,6 +104,8 @@ pub enum SnapshotError {
     LineTimebaseMismatch,
     #[error("Line2D signal {0:?} could not be read")]
     LineColumnRead(SignalId),
+    #[error("histogram could not be prepared: {0}")]
+    Histogram(String),
     #[error("manifest serialization failed: {0}")]
     Serialize(#[from] serde_json::Error),
     #[error("manifest output is not UTF-8: {0}")]
@@ -190,7 +204,11 @@ fn line_plan<'a>(
     })
 }
 
-fn export_plan<'a>(signals: Vec<SignalPlan<'a>>, lines: Vec<LinePlan<'a>>) -> ExportPlan<'a> {
+fn export_plan<'a>(
+    signals: Vec<SignalPlan<'a>>,
+    lines: Vec<LinePlan<'a>>,
+    histograms: Vec<HistogramPlan<'a>>,
+) -> ExportPlan<'a> {
     let series_total = signals.len() as u64;
     let series_decimated = signals
         .iter()
@@ -209,6 +227,7 @@ fn export_plan<'a>(signals: Vec<SignalPlan<'a>>, lines: Vec<LinePlan<'a>>) -> Ex
     ExportPlan {
         signals,
         lines,
+        histograms,
         series_total,
         series_decimated,
         series_full_rate: series_total - series_decimated,
@@ -272,7 +291,8 @@ pub fn plan_selected<'a>(
             })
             .collect::<Result<_, SnapshotError>>()?;
         let lines = line_plans(session, store, &selected_sources, None, fidelity)?;
-        let plan = export_plan(signals, lines);
+        let histograms = histogram::plans(session, store, &selected_sources)?;
+        let plan = export_plan(signals, lines, histograms);
         return Ok(plan);
     }
 
@@ -311,7 +331,8 @@ pub fn plan_selected<'a>(
         })
         .collect::<Result<_, SnapshotError>>()?;
     let lines = line_plans(session, store, &selected_sources, Some((t0, t1)), fidelity)?;
-    let plan = export_plan(signals, lines);
+    let histograms = histogram::plans(session, store, &selected_sources)?;
+    let plan = export_plan(signals, lines, histograms);
     Ok(plan)
 }
 
@@ -380,8 +401,29 @@ fn signal_summary(
 /// Returns [`SnapshotError::Serialize`] when the session cannot be encoded and
 /// [`SnapshotError::MissingLevel`] when a planned level window cannot be
 /// decoded; levels are positional, so a missing level fails the bake instead
-/// of silently shifting later levels toward the finest slot.
+/// of silently shifting later levels toward the finest slot. Histogram capture
+/// errors are returned after the session and line payload have been prepared.
 pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, SnapshotError> {
+    let mut manifest = bake_without_histograms(plan, session)?;
+    if !plan.histograms.is_empty() {
+        manifest.histograms = Some(histogram::bake_plan(&plan.histograms)?);
+    }
+    Ok(manifest)
+}
+
+/// Bakes session, source tiles, and `Line2D` data without scanning histogram
+/// source values. Server export uses this portion while holding its state lock,
+/// then computes histogram captures after the lock is released.
+///
+/// # Errors
+///
+/// Returns [`SnapshotError::Serialize`] when the session cannot be encoded and
+/// [`SnapshotError::MissingLevel`] when a planned level window cannot be
+/// decoded.
+pub fn bake_without_histograms(
+    plan: &ExportPlan,
+    session: &Session,
+) -> Result<SnapshotManifest, SnapshotError> {
     let mut baked_session = session.clone();
     baked_session.sources.clear();
 
@@ -477,6 +519,7 @@ pub fn bake(plan: &ExportPlan, session: &Session) -> Result<SnapshotManifest, Sn
         preferences_json: None,
         signals,
         line2d: Some(line2d),
+        histograms: None,
     })
 }
 
@@ -554,7 +597,10 @@ pub fn estimated_bytes(plan: &ExportPlan) -> u64 {
                 .sum::<u64>()
         })
         .sum::<u64>();
-    signal_bytes.saturating_add(line_bytes)
+    let histogram_bytes = histogram::estimated_bytes(&plan.histograms);
+    signal_bytes
+        .saturating_add(line_bytes)
+        .saturating_add(histogram_bytes)
 }
 
 #[cfg(test)]
@@ -565,10 +611,10 @@ mod tests {
     use crate::pyramid::Pyramid;
     use crate::session::{
         AxisStyle, Binding, BindingKind, NamedSet, NamedSetKind, PanelState, SampleAxisSource,
-        SeriesRef, Session,
+        SeriesOverride, SeriesRef, Session,
     };
     use crate::store::{SignalId, SignalStore, SourceKey};
-    use scope_protocol::{ExportFidelity, ExportRange};
+    use scope_protocol::{ExportFidelity, ExportRange, TimeWindow};
 
     fn store_with(signals: &[(&str, usize)]) -> (SignalStore, BTreeMap<SignalId, Pyramid>) {
         let mut store = SignalStore::new();
@@ -814,11 +860,78 @@ mod tests {
                     .collect(),
             }],
             line2d: Some(Vec::new()),
+            histograms: None,
         };
         assert_eq!(
             actual,
             serde_json::to_vec(&expected).expect("serialize expected")
         );
+    }
+
+    #[test]
+    fn histogram_snapshot_bakes_exact_shared_edges_and_panel_window() {
+        let (store, pyramids) = store_with(&[("a", 10)]);
+        let mut panel = panel("histogram-1", &["a"]);
+        panel.content = crate::session::PanelContent::Histogram { bin_count: 2 };
+        let mut session = session_with(vec![panel]);
+        session.linked_time.t0 = 2.0;
+        session.linked_time.t1 = 6.0;
+
+        let plan = plan(
+            &session,
+            &store,
+            &pyramids,
+            ExportRange::Visible,
+            ExportFidelity::Full,
+        )
+        .expect("histogram plan");
+        assert!(
+            plan.lines.is_empty(),
+            "histograms are not line combinations"
+        );
+        assert_eq!(plan.histograms.len(), 1);
+        assert_eq!(plan.histograms[0].window, TimeWindow { t0: 2.0, t1: 6.0 });
+
+        let manifest = bake(&plan, &session).expect("histogram bake");
+        let histogram = &manifest.histograms.expect("histogram payload")[0];
+        assert_eq!(histogram.panel_id, "histogram-1");
+        assert_eq!(histogram.response.window, TimeWindow { t0: 2.0, t1: 6.0 });
+        assert_eq!(histogram.response.edges, vec![1.0, 2.0, 3.0]);
+        assert_eq!(histogram.response.series[0].counts, vec![2, 3]);
+        assert_eq!(histogram.response.series[0].finite_count, 5);
+        assert_eq!(histogram.response.series[0].excluded_count, 0);
+    }
+
+    #[test]
+    fn histogram_snapshot_excludes_hidden_resolved_series() {
+        let (store, pyramids) = store_with(&[("a", 10), ("b", 10)]);
+        let mut panel = panel("histogram-1", &["a", "b"]);
+        panel.content = crate::session::PanelContent::Histogram { bin_count: 4 };
+        panel.overrides = vec![SeriesOverride {
+            target_ref: Some(SeriesRef {
+                source_key: uuid::Uuid::from_bytes([1; 16]).to_string(),
+                channel: "b".to_owned(),
+            }),
+            target_selector: None,
+            color_slot: None,
+            dash: None,
+            width: None,
+            opacity: None,
+            visible: Some(false),
+        }];
+        let session = session_with(vec![panel]);
+        let plan = plan(
+            &session,
+            &store,
+            &pyramids,
+            ExportRange::Visible,
+            ExportFidelity::Full,
+        )
+        .expect("histogram plan");
+        let manifest = bake(&plan, &session).expect("histogram bake");
+        let histogram = &manifest.histograms.expect("histogram payload")[0];
+        assert_eq!(histogram.response.series.len(), 1);
+        assert_eq!(histogram.response.series[0].signal_path, "a");
     }
 
     #[test]
@@ -1300,6 +1413,7 @@ mod tests {
             session_json: "{}".to_owned(),
             signals: Vec::new(),
             line2d: None,
+            histograms: None,
         }
     }
 }

@@ -29,7 +29,12 @@ import {
   type Command,
 } from "../app/commands";
 import { parseBakedSession } from "../app/baked-session";
-import { buildCsv, csvMaxPoints, type CsvExport } from "../app/csv-export";
+import {
+  buildCsv,
+  buildHistogramCsv,
+  csvMaxPoints,
+  type CsvExport,
+} from "../app/csv-export";
 import type { DataPlane, IngestPort } from "../app/data-plane";
 import { columnsValueAtTime } from "../app/bin-columns";
 import { exportFileStem } from "../app/export-file";
@@ -395,29 +400,34 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        onSeriesAction: (id, action) => {
+        onSeriesAction: (id, action, scope) => {
           const panel = this.workspace.panel(id);
           if (panel === undefined) return;
           this.workspace.applySeriesAction(
             id,
-            this.resolvedFor(panel).map((series) => series.ref),
+            this.resolvedFor(panel)
+              .filter((series) => scope === "all" || series.focused)
+              .map((series) => series.ref),
             action,
+            scope,
           );
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
-          this.renderTiles();
+          if (action === "hide" || action === "show")
+            this.refreshAfterSeriesVisibility(id);
+          else this.renderTiles();
         },
         onMuteSelector: (id, selector) => {
           this.workspace.addSelectorOverride(id, selector, { visible: false });
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
-          this.renderTiles();
+          this.refreshAfterSeriesVisibility(id);
         },
         onMuteSeries: (id, ref) => {
           this.workspace.toggleSeriesVisible(id, ref);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
-          this.renderTiles();
+          this.refreshAfterSeriesVisibility(id);
         },
         onRemoveBinding: (id, index) => {
           this.workspace.removeBinding(id, index);
@@ -455,6 +465,13 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
+        onSetHistogramBins: (id, count) => {
+          this.workspace.setHistogramBinCount(id, count);
+          this.commitHistory();
+          this.workspaceView?.refreshPanelStates();
+          void this.refreshTiles();
+        },
+        canSetHistogramBins: () => this.plane.histogramCaptures === undefined,
         onSetGhostOpacity: (id, opacity) => {
           this.workspace.setGhostOpacity(id, opacity);
           this.commitHistory();
@@ -499,7 +516,7 @@ export class AppShell {
           this.workspace.toggleSeriesVisible(id, ref);
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();
-          this.renderTiles();
+          this.refreshAfterSeriesVisibility(id);
         },
         onResized: () => {
           this.handlePanelResize();
@@ -529,6 +546,7 @@ export class AppShell {
           this.applyXRange(id, range);
         },
         onPinAnnotation: (id, hit) => {
+          const panel = this.workspace.panel(id);
           this.workspace.addAnnotation(id, {
             id: crypto.randomUUID(),
             series_path: hit.path,
@@ -537,6 +555,12 @@ export class AppShell {
             pinned_value: hit.pinnedValue,
             label: "",
             offset: [10, -10],
+            histogram_window: hit.histogramWindow ?? null,
+            histogram_bin_count:
+              hit.histogramBinCount ??
+              (panel?.content.kind === "histogram"
+                ? panel.content.bin_count
+                : null),
           });
           const ref = this.catalog.refFromPath(hit.path);
           if (ref !== undefined) {
@@ -2183,6 +2207,12 @@ export class AppShell {
         background: styles.getPropertyValue("--surface-1").trim(),
         text: styles.getPropertyValue("--fg-1").trim(),
         font: styles.getPropertyValue("--font-ui").trim(),
+        caption:
+          canvases.windowNote === null || canvases.windowNote === undefined
+            ? (canvases.quality ?? null)
+            : canvases.quality === null || canvases.quality === undefined
+              ? canvases.windowNote
+              : `${canvases.windowNote} · ${canvases.quality}`,
       },
     );
     const blob = await new Promise<Blob | null>((resolve) => {
@@ -2253,6 +2283,22 @@ export class AppShell {
     if (panelId === null) return null;
     const panel = this.workspace.panel(panelId);
     if (panel === undefined) return null;
+    if (panel.content.kind === "histogram") {
+      const capture = this.plane.histogramCaptures?.find(
+        (entry) => entry.panel_id === panel.id,
+      );
+      const ids =
+        capture?.response.series.map((series) => series.signal_id) ??
+        this.panelSignalIds(panel).ids;
+      if (ids.length === 0) return null;
+      const response = await this.plane.queryHistogram({
+        request_id: crypto.randomUUID(),
+        signal_ids: ids,
+        window: capture?.response.window ?? this.effectiveWindow(panel),
+        bin_count: panel.content.bin_count,
+      });
+      return buildHistogramCsv(response);
+    }
     const { ids } = this.panelSignalIds(panel);
     if (ids.length === 0) return null;
     const window = this.effectiveWindow(panel);
@@ -2537,9 +2583,13 @@ export class AppShell {
 
   /** Signal ids a panel needs for its plotted series. */
   private panelSignalIds(panel: PanelState) {
+    const resolved =
+      panel.content.kind === "histogram"
+        ? this.resolvedFor(panel).filter((series) => series.visible)
+        : this.resolvedFor(panel);
     return resolveLineBindings(
       panel.x_axis,
-      this.resolvedFor(panel),
+      resolved,
       this.catalog,
       panel.color_axis,
       usesPairedSamples(panel),
@@ -2588,6 +2638,14 @@ export class AppShell {
     this.presentation.render();
   }
 
+  private refreshAfterSeriesVisibility(panelId: string): void {
+    if (this.workspace.panel(panelId)?.content.kind === "histogram") {
+      void this.refreshTiles();
+    } else {
+      this.renderTiles();
+    }
+  }
+
   private applyTimeWindow(panelId: string, t0: number, t1: number): void {
     if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return;
     const panel = this.workspace.panel(panelId);
@@ -2600,6 +2658,7 @@ export class AppShell {
     }
     this.publishCachedCoverage();
     this.markHistoryDirty(`range:${panelId}`);
+    this.scheduleAutosave();
     this.scheduleRender();
     this.scheduleRefresh();
   }
@@ -2653,7 +2712,7 @@ export class AppShell {
     if (panel === undefined) return;
     this.workspace.clearPanelYRange(panelId);
     this.workspaceView?.resetYAxis(panelId);
-    if (panel.x_axis.kind !== "time") {
+    if (panel.content.kind === "histogram" || panel.x_axis.kind !== "time") {
       this.workspace.clearPanelXRange(panelId);
       this.commitHistory();
       this.scheduleAutosave();
@@ -2681,7 +2740,10 @@ export class AppShell {
     const mode = this.workspace.cursorMode();
     if (mode === "none") cursor = null;
     const axis = this.workspace.panel(panelId)?.x_axis;
-    const local = axis !== undefined && axis.kind !== "time";
+    const local =
+      axis !== undefined &&
+      (axis.kind !== "time" ||
+        this.workspace.panel(panelId)?.content.kind === "histogram");
     if (local) {
       this.workspace.setCursorT(null);
       this.workspaceView?.clearCursors();
@@ -3149,8 +3211,8 @@ export function groupCursorRows(
         label: row.label,
         value:
           row.unit === null
-            ? formatValue(row.value)
-            : `${formatValue(row.value)} ${row.unit}`,
+            ? (row.exactValue ?? formatValue(row.value))
+            : `${row.exactValue ?? formatValue(row.value)} ${row.unit}`,
         colorIndex: row.colorIndex,
         ghost: false,
       });
