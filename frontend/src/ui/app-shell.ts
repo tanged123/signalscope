@@ -400,13 +400,16 @@ export class AppShell {
           this.workspaceView?.refreshPanelStates();
           this.renderTiles();
         },
-        onSeriesAction: (id, action) => {
+        onSeriesAction: (id, action, scope) => {
           const panel = this.workspace.panel(id);
           if (panel === undefined) return;
           this.workspace.applySeriesAction(
             id,
-            this.resolvedFor(panel).map((series) => series.ref),
+            this.resolvedFor(panel)
+              .filter((series) => scope === "all" || series.focused)
+              .map((series) => series.ref),
             action,
+            scope,
           );
           this.commitHistory();
           this.workspaceView?.refreshPanelStates();

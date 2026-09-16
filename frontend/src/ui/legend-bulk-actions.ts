@@ -1,17 +1,28 @@
-import type { PanelSeriesAction } from "../app/panel-series-actions";
+import type {
+  PanelSeriesAction,
+  PanelSeriesScope,
+} from "../app/panel-series-actions";
 import type { ResolvedSeries } from "../app/resolution";
 
 export function legendBulkActions(
   series: readonly Pick<ResolvedSeries, "focused" | "visible" | "opacity">[],
-  run: (action: PanelSeriesAction) => void,
+  run: (action: PanelSeriesAction, scope: PanelSeriesScope) => void,
 ): HTMLElement {
   const bar = document.createElement("div");
   bar.className = "plot-legend-bulk-actions";
   bar.setAttribute("role", "group");
-  bar.setAttribute("aria-label", "All plot signals");
-  const selected = series.length > 0 && series.every((item) => item.focused);
-  const hidden = series.length > 0 && series.every((item) => !item.visible);
-  const dimmed = series.length > 0 && series.every((item) => item.opacity < 1);
+  const focused = series.filter((item) => item.focused);
+  const selected = focused.length > 0;
+  const targets = selected ? focused : series;
+  const scope = selected ? "selected" : "all";
+  bar.setAttribute(
+    "aria-label",
+    selected ? "Selected plot signals" : "All plot signals",
+  );
+  const hidden = targets.length > 0 && targets.every((item) => !item.visible);
+  const dimmed =
+    targets.length > 0 && targets.every((item) => item.opacity < 1);
+  const targetLabel = selected ? "selected signals" : "all plot signals";
   const controls: [string, PanelSeriesAction, string][] = [
     [
       selected ? "Clear selection" : "Select all",
@@ -19,16 +30,16 @@ export function legendBulkActions(
       "Select or clear focus for every signal in this plot, including filtered rows; preserve visibility",
     ],
     [
-      dimmed ? "Undim all" : "Dim all",
+      `${dimmed ? "Undim" : "Dim"} ${scope}`,
       dimmed ? "undim" : "dim",
       dimmed
-        ? "Restore full opacity for every plot signal and turn off dim-other-traces; preserve selection and visibility"
-        : "Dim every plot signal at the configured dim opacity; preserve selection and visibility",
+        ? `Restore full opacity for ${targetLabel}${selected ? "" : " and turn off dim-other-traces"}; preserve selection and visibility`
+        : `Dim ${targetLabel} at the configured dim opacity; preserve selection and visibility`,
     ],
     [
-      hidden ? "Show all" : "Hide all",
+      `${hidden ? "Show" : "Hide"} ${scope}`,
       hidden ? "show" : "hide",
-      "Show or hide every signal in this plot, including filtered rows; preserve selection and dimming",
+      `Show or hide ${targetLabel}, including filtered rows; preserve selection and dimming`,
     ],
   ];
   for (const [index, [label, action, title]] of controls.entries()) {
@@ -39,7 +50,9 @@ export function legendBulkActions(
     button.dataset.action = action;
     button.title = title;
     button.disabled = series.length === 0;
-    button.addEventListener("click", () => run(action));
+    button.addEventListener("click", () =>
+      run(action, index === 0 ? "all" : scope),
+    );
     bar.append(button);
   }
   return bar;

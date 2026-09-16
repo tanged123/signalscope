@@ -36,6 +36,7 @@ import {
   applyPanelSeriesAction,
   toggleSeriesVisibility,
   type PanelSeriesAction,
+  type PanelSeriesScope,
 } from "./panel-series-actions";
 
 const MIN_FRACTION = 0.1;
@@ -443,10 +444,11 @@ export class WorkspaceModel {
     panelId: string,
     refs: readonly SeriesRef[],
     action: PanelSeriesAction,
+    scope: PanelSeriesScope = "all",
   ): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
-    applyPanelSeriesAction(panel, refs, action);
+    applyPanelSeriesAction(panel, refs, action, scope);
     this.touch(true);
   }
 

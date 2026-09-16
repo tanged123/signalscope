@@ -15,7 +15,10 @@ import type {
 } from "../generated/session";
 import type { Catalog } from "../app/catalog";
 import type { ResolvedSeries } from "../app/resolution";
-import type { PanelSeriesAction } from "../app/panel-series-actions";
+import type {
+  PanelSeriesAction,
+  PanelSeriesScope,
+} from "../app/panel-series-actions";
 import type { AnnotationAnchor, PlotCursor } from "../app/plot-capabilities";
 import type { AxisLimits } from "./axis-limits";
 type PanelCursor = PlotCursor;
@@ -35,7 +38,11 @@ export interface PanelCallbacks {
   onFocusAdd(id: string, entry: FocusEntry): void;
   onFocusRange(id: string, entries: readonly FocusEntry[]): void;
   onClearFocus(id: string): void;
-  onSeriesAction(id: string, action: PanelSeriesAction): void;
+  onSeriesAction(
+    id: string,
+    action: PanelSeriesAction,
+    scope: PanelSeriesScope,
+  ): void;
   onMuteSelector(id: string, selector: string): void;
   onMuteSeries(id: string, ref: SeriesRef): void;
   onRemoveBinding(id: string, index: number): void;

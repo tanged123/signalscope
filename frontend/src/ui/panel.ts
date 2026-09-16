@@ -1493,8 +1493,8 @@ export class PanelView {
       header.append(undock);
       legend.replaceChildren(
         header,
-        legendBulkActions(state.series, (action) =>
-          this.callbacks.onSeriesAction(this.id, action),
+        legendBulkActions(state.series, (action, scope) =>
+          this.callbacks.onSeriesAction(this.id, action, scope),
         ),
         legendColorControls(state, this.plotLegendEncodingRow(state), () =>
           this.axes.openColor(),
@@ -1563,8 +1563,8 @@ export class PanelView {
       header,
       ...(state.legend_state === "roster" || state.show_stats
         ? [
-            legendBulkActions(state.series, (action) =>
-              this.callbacks.onSeriesAction(this.id, action),
+            legendBulkActions(state.series, (action, scope) =>
+              this.callbacks.onSeriesAction(this.id, action, scope),
             ),
             legendColorControls(state, this.plotLegendEncodingRow(state), () =>
               this.axes.openColor(),
