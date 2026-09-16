@@ -41,6 +41,7 @@ declare module "@chartgpu/chartgpu" {
   }
 
   export interface ScatterSeriesConfig {
+    pointColors?: Float32Array | undefined;
     type: "scatter";
     mode?: "points";
     name?: string;

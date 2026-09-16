@@ -30,8 +30,6 @@ export function setColorAxis(
   panel: PanelState,
   axis: ColorAxis | null,
 ): "binding" | "scale" | false {
-  if (panel.content.kind === "scatter2d" && axis !== null)
-    throw new Error("Scatter does not support a continuous color axis.");
   if (JSON.stringify(panel.color_axis) === JSON.stringify(axis)) return false;
   if (
     axis?.range != null &&

@@ -54,6 +54,10 @@ inputs independently of PanelView. `ui/panel-layout-actions.ts` connects layout
 mutations to publication; `ui/panel-layout-menu.ts` supplies creation through a
 keyboard-accessible popover lifecycle. Scatter uses point
 picking and ChartHost point publication with the existing cache/resource policy.
+Scatter reuses the shared C-axis query, limits and colorbar. The vendor scatter
+attribute owner compacts RGBA with finite XY rows, while the shared point-color
+buffer owner retains uploads across viewport changes and releases replacements.
+Stored scatter widths are CSS pixel diameters; ChartHost converts to GPU radii.
 
 ## System boundaries
 

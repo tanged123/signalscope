@@ -104,11 +104,6 @@ pub fn from_json(json: &str) -> Result<Session, SessionError> {
     }
     let session: Session = serde_json::from_value(current)?;
     for panel in session.tabs.iter().flat_map(|tab| &tab.panels) {
-        if matches!(panel.content, PanelContent::Scatter2d) && panel.color_axis.is_some() {
-            return Err(SessionError::Json(serde::de::Error::custom(
-                "scatter does not support a continuous color axis",
-            )));
-        }
         for (scale, range) in [
             (panel.x_scale, panel.x_range),
             (panel.y_scale, panel.y_range),

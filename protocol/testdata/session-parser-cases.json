@@ -485,9 +485,9 @@
           "scale": null
         }
       },
-      "name": "scatter continuous color unavailable",
+      "name": "scatter continuous color",
       "session": {},
-      "valid": false
+      "valid": true
     }
   ]
 }

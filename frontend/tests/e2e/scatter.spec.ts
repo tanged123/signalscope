@@ -66,19 +66,22 @@ test("create scatter in a maximized workspace, assign XY, restore and export off
       submit.call(this, [encoder.finish()]);
       buffer.mapAsync(1).then(() => {
         const pixels = new Uint8Array(buffer.getMappedRange());
-        let colored = 0;
+        let colored = 0, warm = 0;
+        const bgra = texture.format.startsWith("bgra");
         for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
           const i = y * bytesPerRow + x * 4;
           if (Math.max(pixels[i], pixels[i+1], pixels[i+2]) - Math.min(pixels[i], pixels[i+1], pixels[i+2]) > 40) colored++;
+          const r = pixels[i + (bgra ? 2 : 0)], g = pixels[i+1], b = pixels[i + (bgra ? 0 : 2)];
+          if (r > 120 && g > 100 && b < 100) warm++;
         }
         document.documentElement.dataset.scatterPixels = String(colored);
+        document.documentElement.dataset.scatterWarmPixels = String(warm);
         if (colored > 100) {
           const frame = document.createElement("canvas");
           frame.width = width;
           frame.height = height;
           const context = frame.getContext("2d");
           const data = context.createImageData(width, height);
-          const bgra = texture.format.startsWith("bgra");
           for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
             const source = y * bytesPerRow + x * 4, target = (y * width + x) * 4;
             data.data[target] = pixels[source + (bgra ? 2 : 0)];
@@ -109,11 +112,11 @@ test("create scatter in a maximized workspace, assign XY, restore and export off
     const path = join(directory, "run.csv");
     writeFileSync(
       path,
-      "time,x,y\n" +
+      "time,x,y,c\n" +
         Array.from(
           { length: 51 },
           (_, i) =>
-            `${String(i)},${String(Math.sin(i * 1.2) * 5)},${String(Math.cos(i * 0.7) * 4)}`,
+            `${String(i)},${String(Math.sin(i * 1.2) * 5)},${String(Math.cos(i * 0.7) * 4)},${String(i + 1)}`,
         ).join("\n"),
     );
     const job = (
@@ -176,7 +179,7 @@ test("create scatter in a maximized workspace, assign XY, restore and export off
     const scatter = page.locator('[data-panel-id="panel-2"]');
     await expect(scatter.locator(".panel-axes-value")).toContainText("scatter");
     await openPanelAxes(scatter);
-    await expect(scatter.locator(".panel-c-axis")).toBeHidden();
+    await expect(scatter.locator(".panel-c-axis")).toBeVisible();
     await scatter.locator(".panel-y-axis").click();
     await scatter.locator(".axis-picker input").fill("run/y");
     const timeReply = page.waitForResponse(
@@ -195,6 +198,32 @@ test("create scatter in a maximized workspace, assign XY, restore and export off
     );
     await scatter.locator(".axis-picker input").press("Enter");
     await xyReply;
+    await scatter.getByRole("button", { name: "Style", exact: true }).click();
+    await scatter
+      .getByRole("menuitemradio", { name: "0.5 px", exact: true })
+      .click();
+    await expect(scatter.locator(".panel-line-width-value")).toHaveText("0.5");
+    await scatter.getByRole("button", { name: "Style", exact: true }).click();
+    await scatter
+      .getByRole("menuitemradio", { name: "2.0 px", exact: true })
+      .click();
+    await openPanelAxes(scatter);
+    await scatter.locator(".panel-c-axis").click();
+    await scatter.locator(".axis-picker input").fill("run/c");
+    await scatter.locator(".axis-picker input").press("Enter");
+    await expect(scatter.locator(".colorbar-canvas")).toBeVisible();
+    await expect(scatter.locator(".colorbar-canvas")).toHaveAttribute(
+      "aria-label",
+      /1 to 51/,
+    );
+    await expect
+      .poll(() =>
+        page
+          .locator("html")
+          .getAttribute("data-scatter-warm-pixels")
+          .then(Number),
+      )
+      .toBeGreaterThan(0);
     await expect
       .poll(
         () =>
@@ -212,7 +241,7 @@ test("create scatter in a maximized workspace, assign XY, restore and export off
               JSON.parse(
                 readFileSync(pathToFileURL(workspacePath), "utf8"),
               ) as Session
-            ).tabs[0]?.panels[1]?.x_axis.kind;
+            ).tabs[0]?.panels[1]?.color_axis?.source.kind;
           } catch {
             return null;
           }
@@ -230,6 +259,18 @@ test("create scatter in a maximized workspace, assign XY, restore and export off
     await page.reload();
     await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
     await expect(scatter.locator(".panel-axes-value")).toContainText("scatter");
+    await expect(scatter.locator(".colorbar-canvas")).toHaveAttribute(
+      "aria-label",
+      /1 to 51/,
+    );
+    await expect
+      .poll(() =>
+        page
+          .locator("html")
+          .getAttribute("data-scatter-warm-pixels")
+          .then(Number),
+      )
+      .toBeGreaterThan(0);
     await expect
       .poll(
         () =>
@@ -283,6 +324,18 @@ test("create scatter in a maximized workspace, assign XY, restore and export off
     await page.goto(pathToFileURL(snapshot).href);
     await expect(page.locator("#app")).toHaveAttribute("data-ready", "true");
     await expect(scatter.locator(".panel-axes-value")).toContainText("scatter");
+    await expect(scatter.locator(".colorbar-canvas")).toHaveAttribute(
+      "aria-label",
+      /1 to 51/,
+    );
+    await expect
+      .poll(() =>
+        page
+          .locator("html")
+          .getAttribute("data-scatter-warm-pixels")
+          .then(Number),
+      )
+      .toBeGreaterThan(0);
     await expect
       .poll(
         () =>
@@ -301,6 +354,19 @@ test("create scatter in a maximized workspace, assign XY, restore and export off
     await page.screenshot({
       path: testInfo.outputPath("mixed-scatter-offline.png"),
     });
+    await openPanelAxes(scatter);
+    await scatter.locator(".panel-c-axis").click();
+    await scatter.locator(".axis-picker input").fill("none");
+    await scatter.locator(".axis-picker input").press("Enter");
+    await expect(scatter.locator(".colorbar-canvas")).toBeHidden();
+    await expect
+      .poll(() =>
+        page
+          .locator("html")
+          .getAttribute("data-scatter-warm-pixels")
+          .then(Number),
+      )
+      .toBe(0);
     expect(offlineRequests).toEqual([]);
     expect(errors).toEqual([]);
     expect(

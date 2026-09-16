@@ -37,10 +37,16 @@ Scatter always queries the paired sample contract, including when X is time.
 The existing reducer selects actual rows with shared X/Y correspondence;
 scatter is explicitly sampled, not a density-preserving or exhaustive cloud.
 No additional endpoint, reducer, interpolation, or combination cache is needed.
-Continuous per-point color is not supported in this first scatter version;
-native and baked readers reject a scatter color axis, and the UI omits that
-assignment. Existing width settings control marker diameter (three times the
-stroke width); dash identities map to circle, rectangle, and triangle markers.
+Scatter supports the same time/signal/bundle C binding, labeled colorbar,
+shared limits, and linear/log color scales as Line2D (ADR 0057).
+X/Y/C retain the paired table's exact row correspondence; missing or nonpositive
+log C uses the neutral series color without dropping the point.
+Existing width settings now directly represent marker diameter in CSS pixels,
+with a 2 px default and choices from 0.5 to 8 px. ChartGPU consumes a radius,
+so ChartHost divides the diameter by two. The earlier width-times-three mapping
+actually produced a radius, making its default 12 px across; saved scatter
+widths receive the corrected presentation without changing stored settings.
+Line widths retain their existing meaning and choices.
 The same native capture binding selection includes these paired groups, so
 offline snapshots retain point positions and the same zoom fidelity limits.
 
@@ -51,6 +57,26 @@ ChartHost lifecycle are shared. Viewport changes retain setViewRange behavior;
 data/style changes publish atomically with setOption. Controller cancellation,
 generation checks, global density admission, and overview/detail retention are
 unchanged. The shared query-selection predicate removes repeated policy tests.
+
+The September 16 amendment extends the ChartGPU attribute contract to scatter.
+`config/scatterPointColors.ts` rejects sampling, animation, density rendering,
+and variable point sizes when aligned colors are present. Append rejects before
+mutation; replacements use one atomic setOption. The renderer's
+`scatterPointColors.ts` owns finite-XY color compaction, cached by immutable
+geometry/color identity, matching the existing geometry compaction. The shared
+`pointColors.ts` owns buffer upload, replacement, and disposal for both line and
+scatter. Viewport/uniform changes retain buffers; disabling C releases the
+attribute buffer. The shader selects each point's RGBA or neutral fallback and
+applies series opacity, so dimming and hover retain measured colors. Only the
+current compacted color feed is retained beside the existing source attributes;
+there is no independent C query or history cache.
+
+This amendment permits only attribute declarations and the extracted validator
+call in the oversized vendor `config/types.ts` and `config/OptionResolver.ts`,
+plus extension of the existing append guard in `ChartGPU.ts`. New color policy
+and resource behavior live in the named smaller modules. Session v33's existing
+color_axis field is reused; this completes scatter support within the same PR
+and introduces no additional schema or release version bump.
 
 This change permits bounded composition-only edits in panel.ts, app-shell.ts and workspace.ts:
 extract panel contracts and replace existing layout callback wiring with a
@@ -75,6 +101,9 @@ Test creation placement, maximized creation/restore, menu keyboard dismissal
 and cleanup, session migration and unknown content, point-only picking, paired
 query selection, renderer publication, and native/offline capture. Browser
 coverage exercises mixed plots, persistence and creation in constrained panels.
+Color coverage checks sparse XY/color alignment, buffer retention and cleanup,
+unsupported geometry rejection, smaller diameter selection, actual colored GPU
+pixels, session restore, and offline colorbar rendering and C removal.
 Performance beyond the existing adaptive sample budgets is not claimed.
 
 ## Consequences and implementation status

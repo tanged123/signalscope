@@ -184,9 +184,11 @@ export class ChartHost {
               mode: "points",
               name: line.name,
               data,
+              pointColors: line.pointColors,
               sampling: "none",
               color: pointColor(color, opacity),
-              symbolSize: Math.max(2, width * 3),
+              // ChartGPU's symbolSize is a radius; the UI stores diameter.
+              symbolSize: width / 2,
               symbol:
                 style.dash === "dash"
                   ? "rect"

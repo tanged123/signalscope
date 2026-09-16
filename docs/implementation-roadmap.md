@@ -14,9 +14,10 @@ are recorded in [ADRs](adr/README.md).
 
 - Panel layout menus create Time series or Scatter to the left or right.
   Creation restores a maximized grid and focuses the new panel. Scatter plots
-  sampled paired observations, with X/Y assignment, marker sizes, point picking,
-  axes and offline export. Session v33 migrates old panels to Line2D. Continuous
-  scatter color and density-preserving reduction remain future work (ADR 0066).
+  sampled paired observations, with X/Y/C assignment, a labeled colorbar, point
+  picking, axes and offline export. Marker diameters range from 0.5 to 8 px with
+  a 2 px default. Session v33 migrates old panels to Line2D.
+  Density-preserving reduction remains future work (ADR 0066).
 
 - Chrome keeps dataset totals and chart metrics in the status bar, with
   compact plot, style, and readouts menus in each plot header. The header stays on
