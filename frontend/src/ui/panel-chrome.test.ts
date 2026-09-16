@@ -32,6 +32,7 @@ function state(): PanelState {
     id: "panel",
     title: "Panel",
     content: { kind: "line2d" },
+    content_selection_pending: false,
     axis_style: "gutter",
     axis_equal: false,
     x_scale: null,

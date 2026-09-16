@@ -307,6 +307,8 @@ pub struct PanelState {
     pub stats_sort: Option<StatColumn>,
     pub stats_sort_descending: bool,
     pub content: PanelContent,
+    #[serde(default)]
+    pub content_selection_pending: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

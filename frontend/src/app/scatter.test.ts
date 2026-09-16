@@ -40,18 +40,16 @@ test("rejected split leaves session, focus and maximization intact", () => {
   expect(JSON.stringify(model.snapshot())).toBe(before);
 });
 
-test("left creation inserts before its source and restores the grid", () => {
+test("down creation splits the row height and restores the grid", () => {
   const model = new WorkspaceModel();
   const original = model.addPanelRow();
   model.maximizePanel(original.id);
-  const scatter = model.splitPanelLeft(original.id, { kind: "scatter2d" });
-  expect(model.layout()[0]?.panels.map((cell) => cell.panel_id)).toEqual([
-    scatter?.id,
+  const scatter = model.splitPanelDown(original.id, { kind: "scatter2d" });
+  expect(model.layout().map((row) => row.panels[0]?.panel_id)).toEqual([
     original.id,
+    scatter?.id,
   ]);
-  expect(model.layout()[0]?.panels.map((cell) => cell.width)).toEqual([
-    0.5, 0.5,
-  ]);
+  expect(model.layout().map((row) => row.height)).toEqual([0.5, 0.5]);
   expect(model.maximizedPanelId()).toBeNull();
   expect(model.focusedPanelId()).toBe(scatter?.id);
 });

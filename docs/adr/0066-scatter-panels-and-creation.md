@@ -21,21 +21,29 @@ then the creation menu and scatter presentation. WorkspaceModel remains the
 sole session owner. Panel creation defaults and layout mutations are separate
 from presentation; shell callbacks publish changes through existing history,
 refresh, and cache invalidation paths. The shell owns the layout menu and its
-listener cleanup. Five header buttons provide add-left, add-right, minimize,
-maximize, and the illustrated type picker with Left/Right placement. Creating
+listener cleanup. Five header buttons provide add-right, add-down, minimize,
+maximize, and the illustrated type picker with Right/Down placement. Creating
 beside a maximized panel restores the grid and focuses the new panel. Separate
 minimize/maximize controls restore the grid or expand the panel, with the
 unavailable action disabled. Closing retains existing workspace behavior and
 remains available in the dropdown. Only implemented types appear in the menu.
 
-Empty panels, including those created with N in a new workspace, offer the
-same illustrated 2D line/Scatter choices in the plot area. 2D line
-starts selected so direct signal drops still work. Choosing a type updates the
-existing panel in place, retaining ID, layout, and axis settings. The choice
-remains available until a binding is assigned. `app/panel-content.ts` rejects
-changes to bound panels and no-op selections; WorkspaceModel publishes successful
-changes through the existing revision/history/autosave path. PanelShell retains
-the choice buttons across updates so keyboard focus survives selection.
+Panels created without an explicit type, including N in a new workspace, offer
+the same illustrated 2D line/Scatter choices in the plot area. 2D line is the
+default for direct signal drops. Choosing either type completes selection in
+place, retaining ID, layout, and axis settings. Menu-created panels and direct
+Right/Down shortcuts already have a chosen type and show only the signal prompt.
+WorkspaceModel owns the optional `content_selection_pending` session field:
+construction without a type sets it, while choosing a type or assigning a binding
+clears it. Missing/null defaults to false for existing saved panels. History,
+save/restore and snapshots retain it; closing a panel removes it with that panel.
+No new schema version is needed for this additive field in v33.
+`app/panel-content.ts` rejects changes after selection or signal assignment;
+WorkspaceModel publishes successful choices through revision/history/autosave.
+PanelShell retains buttons across ordinary updates and returns keyboard focus to
+the panel when selection removes them. Tests cover both creation paths,
+confirmation of the default type, history restoration, binding removal, native
+and baked compatibility, and browser layout/focus.
 
 Session version 33 adds tagged PanelContent with line2d and scatter2d variants.
 Version 32 migrates to line2d. Both concrete types share the existing Cartesian
@@ -91,12 +99,13 @@ This change permits bounded composition-only edits in panel.ts, app-shell.ts and
 extract panel contracts and replace existing layout callback wiring with a
 narrow composition function, and delegate existing split/default construction
 to panel-layout.ts and panel-defaults.ts. Workspace method changes are limited
-to passing the selected content, composing a left split through the same admission
-helper, and retaining revision publication. New menu, query, and rendering behavior lives in
+to passing the selected content through the shared split admission helper
+and retaining revision publication. New menu, query, and rendering behavior lives in
 their owning modules. This does not clear the remaining legend/shell size debt
 or permit additional behavior in those oversized owners.
-The empty-panel follow-up permits only a status content input in PanelView and
-a WorkspaceModel method delegating to the content guard and revision owner.
+The empty-panel follow-up permits only a status content input in PanelView,
+delegation to the content guard and revision owner in WorkspaceModel, and clearing
+pending selection at its three existing binding-assignment publication points.
 
 ## Alternatives and tradeoffs
 

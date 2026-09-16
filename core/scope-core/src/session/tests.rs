@@ -17,11 +17,23 @@ fn line_sessions_migrate_and_scatter_round_trips() {
         PanelContent::Line2d
     ));
     session.tabs[0].panels[0].content = PanelContent::Scatter2d;
+    assert_eq!(session.tabs[0].panels[0].content_selection_pending, None);
+    session.tabs[0].panels[0].content_selection_pending = Some(false);
     let restored = from_json(&serde_json::to_string(&session).unwrap()).unwrap();
     assert!(matches!(
         restored.tabs[0].panels[0].content,
         PanelContent::Scatter2d
     ));
+    assert_eq!(
+        restored.tabs[0].panels[0].content_selection_pending,
+        Some(false)
+    );
+    session.tabs[0].panels[0].content_selection_pending = Some(true);
+    let restored = from_json(&serde_json::to_string(&session).unwrap()).unwrap();
+    assert_eq!(
+        restored.tabs[0].panels[0].content_selection_pending,
+        Some(true)
+    );
 }
 
 const SESSION_FIXTURE_PATH: &str = concat!(
@@ -200,6 +212,7 @@ fn current_session_round_trips() {
             maximized_panel_id: None,
             panels: vec![PanelState {
                 content: crate::session::PanelContent::Line2d,
+                content_selection_pending: None,
                 id: "panel-a".into(),
                 title: "Body velocity".into(),
                 axis_style: AxisStyle::Gutter,

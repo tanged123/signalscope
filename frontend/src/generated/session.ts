@@ -148,6 +148,7 @@ export interface PanelState {
   stats_sort: StatColumn | null;
   stats_sort_descending: boolean;
   content: PanelContent;
+  content_selection_pending: boolean | null;
 }
 
 export interface LayoutCell {

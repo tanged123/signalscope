@@ -6,7 +6,6 @@ export function panelLayoutCallbacks(
   publish: () => void,
 ): Pick<
   PanelCallbacks,
-  | "onSplitLeft"
   | "onSplitRight"
   | "onSplitDown"
   | "onMaximize"
@@ -16,10 +15,6 @@ export function panelLayoutCallbacks(
   return {
     onSetEmptyPanelContent: (id, content) => {
       if (workspace.setEmptyPanelContent(id, content)) publish();
-    },
-    onSplitLeft: (id, content) => {
-      workspace.splitPanelLeft(id, content);
-      publish();
     },
     onMinimize: () => {
       workspace.restoreGrid();

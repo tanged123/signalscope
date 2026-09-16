@@ -26,7 +26,6 @@ export type PanelShellStatus =
 export interface PanelShellCallbacks {
   onFocus: (id: string) => void;
   onClose: (id: string) => void;
-  onSplitLeft?: (id: string, content?: PanelContent) => void;
   onMinimize?: (id: string) => void;
   onSetEmptyPanelContent?: (id: string, content: PanelContent) => void;
   onSplitRight: (id: string, content?: PanelContent) => void;
@@ -176,6 +175,7 @@ export class PanelShell {
         );
       return;
     }
+    if (slot.contains(document.activeElement)) this.element.focus();
     if (status.kind === "ready") {
       delete slot.dataset.state;
       slot.textContent = "";
@@ -212,8 +212,8 @@ export class PanelShell {
       event.stopPropagation();
     });
     for (const [slot, run] of [
-      ["split-left", () => this.callbacks.onSplitLeft?.(this.id)],
       ["split-right", () => this.callbacks.onSplitRight(this.id)],
+      ["split-down", () => this.callbacks.onSplitDown(this.id)],
       ["minimize", () => this.callbacks.onMinimize?.(this.id)],
       ["maximize", () => this.callbacks.onMaximize(this.id)],
     ] as const)
@@ -240,7 +240,7 @@ export class PanelShell {
         create: (position, content) => {
           if (position === "right")
             this.callbacks.onSplitRight(this.id, content);
-          else this.callbacks.onSplitLeft?.(this.id, content);
+          else this.callbacks.onSplitDown(this.id, content);
         },
         close: () => this.callbacks.onClose(this.id),
       });
@@ -341,8 +341,8 @@ function panelShellMarkup(): string {
       </span>
       <span class="panel-toolbar-slot" data-panel-slot="controls"></span>
       <span class="panel-actions" data-panel-slot="actions">
-        <button class="panel-action panel-split-left" data-panel-slot="split-left" type="button" aria-label="Add plot left" title="Add plot left">←</button>
         <button class="panel-action panel-split-right" data-panel-slot="split-right" type="button" aria-label="Add plot right" title="Add plot right">→</button>
+        <button class="panel-action panel-split-down" data-panel-slot="split-down" type="button" aria-label="Add plot down" title="Add plot down">↓</button>
         <button class="panel-action panel-minimize" data-panel-slot="minimize" type="button" aria-label="Minimize plot" title="Minimize plot — restore grid" disabled>↙</button>
         <button class="panel-action panel-maximize" data-panel-slot="maximize" type="button" aria-label="Maximize plot" title="Maximize plot">↗</button>
         <button class="panel-action panel-layout" data-panel-slot="layout" type="button" aria-label="Panel layout" aria-haspopup="dialog" aria-expanded="false" title="Add panel type">▾</button>

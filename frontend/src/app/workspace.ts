@@ -349,7 +349,7 @@ export class WorkspaceModel {
     return null;
   }
 
-  addPanelRow(content: PanelContent = { kind: "line2d" }): PanelState {
+  addPanelRow(content?: PanelContent): PanelState {
     this.activeTab().maximized_panel_id = null;
     const panel = this.createPanel(content);
     this.appendRow(panel.id);
@@ -364,17 +364,6 @@ export class WorkspaceModel {
       return false;
     this.touch(true);
     return true;
-  }
-
-  splitPanelLeft(
-    id: string,
-    content: PanelContent = { kind: "line2d" },
-  ): PanelState | null {
-    const panel = splitPanel(this.activeTab(), id, "left", () =>
-      this.createPanel(content),
-    );
-    if (panel !== null) this.touch(true);
-    return panel;
   }
 
   splitPanelRight(
@@ -466,6 +455,7 @@ export class WorkspaceModel {
       this.createPickBinding(panel);
     if (binding.refs.some((entry) => sameRef(entry, ref))) return false;
     binding.refs.push({ ...ref });
+    panel.content_selection_pending = false;
     this.touch(true);
     return true;
   }
@@ -825,6 +815,7 @@ export class WorkspaceModel {
       refs: [],
       set_id: null,
     });
+    panel.content_selection_pending = false;
     this.touch(true);
     return true;
   }
@@ -845,6 +836,7 @@ export class WorkspaceModel {
       refs: [],
       set_id: setId,
     });
+    panel.content_selection_pending = false;
     this.touch(true);
     return true;
   }
@@ -1160,7 +1152,7 @@ export class WorkspaceModel {
     });
   }
 
-  private createPanel(content: PanelContent = { kind: "line2d" }): PanelState {
+  private createPanel(content?: PanelContent): PanelState {
     this.nextPanelNumber = nextUnusedNumber(this.nextPanelNumber, (number) =>
       this.panelIdExists(`panel-${String(number)}`),
     );

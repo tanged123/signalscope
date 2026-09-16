@@ -24,7 +24,6 @@ export type EncodingProperty = "color" | "dash" | "width";
 export interface PanelCallbacks {
   onFocus(id: string): void;
   onClose(id: string): void;
-  onSplitLeft?(id: string, content?: PanelContent): void;
   onMinimize?(id: string): void;
   onSetEmptyPanelContent?(id: string, content: PanelContent): void;
   onSplitRight(id: string, content?: PanelContent): void;

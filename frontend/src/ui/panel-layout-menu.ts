@@ -4,7 +4,7 @@ import type { PanelContent } from "../generated/session";
 import { positionPanelPopover } from "./panel-menu";
 
 export interface PanelLayoutActions {
-  create(position: "left" | "right", content: PanelContent): void;
+  create(position: "right" | "down", content: PanelContent): void;
   close(): void;
 }
 
@@ -14,7 +14,7 @@ export function showPanelLayoutMenu(
   title: string,
   actions: PanelLayoutActions,
 ): () => void {
-  let position: "left" | "right" = "right";
+  let position: "right" | "down" = "right";
   const abort = new AbortController();
   const menu = document.createElement("div");
   menu.className = "panel-config-popover panel-creation-menu";
@@ -23,8 +23,8 @@ export function showPanelLayoutMenu(
   menu.innerHTML = `<div class="panel-creation-title">Add panel</div>
     <div class="panel-creation-position"><span>Position</span>
       <div role="group" aria-label="Position">
-        <button type="button" data-position="left" aria-pressed="false">← Left</button>
         <button type="button" data-position="right" aria-pressed="true">→ Right</button>
+        <button type="button" data-position="down" aria-pressed="false">↓ Down</button>
       </div>
     </div>
     <div class="panel-creation-types" role="group" aria-label="Panel type">
@@ -47,7 +47,10 @@ export function showPanelLayoutMenu(
         "aria-pressed",
         String(button.dataset.position === position),
       );
-    destination.textContent = `${position === "left" ? "←" : "→"} Adds to the ${position} of ${title}`;
+    destination.textContent =
+      position === "right"
+        ? `→ Adds to the right of ${title}`
+        : `↓ Adds below ${title}`;
   };
   const close = (focus = false): void => {
     abort.abort();
@@ -60,7 +63,7 @@ export function showPanelLayoutMenu(
       "click",
       () => {
         if (button.dataset.position !== undefined) {
-          position = button.dataset.position as "left" | "right";
+          position = button.dataset.position as "right" | "down";
           updatePosition();
         } else {
           close(true);
@@ -129,6 +132,6 @@ export function showPanelLayoutMenu(
   container.append(menu);
   positionMenu();
   anchor.setAttribute("aria-expanded", "true");
-  placements[1]?.focus();
+  placements[0]?.focus();
   return () => close();
 }

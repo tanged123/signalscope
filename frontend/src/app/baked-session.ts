@@ -27,6 +27,7 @@ export function parseBakedSession(sessionJson: string): Session {
         panel.color_axis.scale ??= null;
       }
       panel.axis_equal ??= false;
+      panel.content_selection_pending ??= false;
       panel.x_scale ??= null;
       panel.y_scale ??= null;
       panel.x_reversed ??= null;
@@ -282,6 +283,8 @@ function isPanel(value: unknown): boolean {
     isRecord(value.content) &&
     Object.keys(value.content).length === 1 &&
     (value.content.kind === "line2d" || value.content.kind === "scatter2d") &&
+    (value.content_selection_pending == null ||
+      typeof value.content_selection_pending === "boolean") &&
     typeof value.id === "string" &&
     typeof value.title === "string" &&
     (value.axis_style === "gutter" || value.axis_style === "inline") &&

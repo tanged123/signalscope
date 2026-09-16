@@ -3,11 +3,12 @@ import { DEFAULT_PANEL_LINE_WIDTH } from "./style-defaults";
 
 export function createPanelState(
   number: number,
-  content: PanelContent = { kind: "line2d" },
+  content?: PanelContent,
 ): PanelState {
   return {
     id: `panel-${String(number)}`,
-    content: { ...content },
+    content: { ...(content ?? { kind: "line2d" }) },
+    content_selection_pending: content === undefined,
     title: `Panel ${String(number)}`,
     axis_style: "inline",
     axis_equal: false,

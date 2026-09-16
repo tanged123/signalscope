@@ -10,7 +10,6 @@ function callbacks(): PanelShellCallbacks {
     onFocus: vi.fn(),
     onClose: vi.fn(),
     onSplitRight: vi.fn(),
-    onSplitLeft: vi.fn(),
     onMinimize: vi.fn(),
     onSplitDown: vi.fn(),
     onMaximize: vi.fn(),
@@ -21,7 +20,7 @@ function callbacks(): PanelShellCallbacks {
 }
 
 describe("PanelShell", () => {
-  it("keeps empty-panel choices and keyboard focus stable across selection and clears them for other states", () => {
+  it("keeps choices stable during updates and returns focus to the panel when selection finishes", () => {
     const onSetEmptyPanelContent = vi.fn();
     const shell = new PanelShell("panel-1", {
       ...callbacks(),
@@ -49,6 +48,12 @@ describe("PanelShell", () => {
     });
     expect(document.activeElement).toBe(scatter);
     expect(scatter.getAttribute("aria-pressed")).toBe("true");
+    shell.setStatus({
+      kind: "empty",
+      message: "Empty panel — drag a signal here.",
+    });
+    expect(shell.slots.status.querySelector("button")).toBeNull();
+    expect(document.activeElement).toBe(shell.element);
     shell.setStatus({ kind: "loading", message: "Loading" });
     expect(shell.slots.status.querySelector("button")).toBeNull();
     shell.setStatus({ kind: "empty", message: "No matching signals" });
@@ -118,13 +123,13 @@ describe("PanelShell", () => {
     expect(max.disabled).toBe(false);
     max.click();
     shell.element
-      .querySelector<HTMLButtonElement>(".panel-split-left")
+      .querySelector<HTMLButtonElement>(".panel-split-down")
       ?.click();
     shell.element
       .querySelector<HTMLButtonElement>(".panel-split-right")
       ?.click();
     expect(panelCallbacks.onMinimize).toHaveBeenCalledWith("panel-1");
-    expect(panelCallbacks.onSplitLeft).toHaveBeenCalledWith("panel-1");
+    expect(panelCallbacks.onSplitDown).toHaveBeenCalledWith("panel-1");
     expect(panelCallbacks.onSplitRight).toHaveBeenCalledWith("panel-1");
     expect(panelCallbacks.onClose).toHaveBeenCalledWith("panel-1");
     expect(panelCallbacks.onMaximize).toHaveBeenCalledWith("panel-1");

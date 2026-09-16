@@ -8,6 +8,20 @@ import { parseBakedSession } from "./baked-session";
 import { emptySession, WorkspaceModel } from "./workspace";
 
 describe("parseBakedSession", () => {
+  it("defaults old panels to a chosen type and rejects invalid selection state", () => {
+    const workspace = new WorkspaceModel();
+    const panel = workspace.addPanelRow();
+    const legacy = panel as unknown as Record<string, unknown>;
+    delete legacy.content_selection_pending;
+    expect(
+      parseBakedSession(JSON.stringify(workspace.snapshot())).tabs[0]?.panels[0]
+        ?.content_selection_pending,
+    ).toBe(false);
+    legacy.content_selection_pending = "true";
+    expect(() =>
+      parseBakedSession(JSON.stringify(workspace.snapshot())),
+    ).toThrow("invalid structure");
+  });
   it("restores color overrides beyond the old eight slots and byte range", () => {
     const model = new WorkspaceModel();
     const panel = model.addPanelRow();

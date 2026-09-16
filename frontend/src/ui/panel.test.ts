@@ -63,10 +63,10 @@ describe("panel markup", () => {
       },
     );
     const onSplitRight = vi.fn();
-    const onSplitLeft = vi.fn();
+    const onSplitDown = vi.fn();
     const panel = new PanelView("panel", {
       onSplitRight,
-      onSplitLeft,
+      onSplitDown,
     } as unknown as PanelCallbacks);
     const open = () =>
       required<HTMLButtonElement>(panel.element, ".panel-layout").click();
@@ -81,13 +81,13 @@ describe("panel markup", () => {
     open();
     required<HTMLButtonElement>(
       panel.element,
-      '[data-position="left"]',
+      '[data-position="down"]',
     ).click();
     required<HTMLButtonElement>(
       panel.element,
       '[data-type="scatter2d"]',
     ).click();
-    expect(onSplitLeft).toHaveBeenCalledExactlyOnceWith("panel", {
+    expect(onSplitDown).toHaveBeenCalledExactlyOnceWith("panel", {
       kind: "scatter2d",
     });
     vi.unstubAllGlobals();
@@ -186,6 +186,7 @@ function timeState(series: RenderSeries[]): RenderPanelState {
     id: "panel",
     title: "Time",
     content: { kind: "line2d" },
+    content_selection_pending: false,
     axis_style: "gutter",
     axis_equal: false,
     x_scale: null,

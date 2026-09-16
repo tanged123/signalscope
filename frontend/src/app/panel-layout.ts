@@ -4,7 +4,7 @@ import type { PanelState, WorkspaceTab } from "../generated/session";
 export function splitPanel(
   tab: WorkspaceTab,
   id: string,
-  position: "left" | "right" | "below",
+  position: "right" | "below",
   create: () => PanelState,
 ): PanelState | null {
   const rowIndex = tab.layout.findIndex((row) =>
@@ -20,7 +20,7 @@ export function splitPanel(
   const half = fraction / 2;
   if (position !== "below") {
     cell.width = half;
-    row.panels.splice(cellIndex + (position === "right" ? 1 : 0), 0, {
+    row.panels.splice(cellIndex + 1, 0, {
       panel_id: panel.id,
       width: half,
     });

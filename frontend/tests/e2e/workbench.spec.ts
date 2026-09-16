@@ -316,6 +316,7 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
         id: "legend-probe-panel",
         title: "Many series",
         content: { kind: "line2d" },
+        content_selection_pending: false,
         axis_style: "inline",
         axis_equal: false,
         x_scale: null,

@@ -4,9 +4,10 @@ export function setEmptyPanelContent(
   panel: PanelState,
   content: PanelContent,
 ): boolean {
-  if (panel.bindings.length > 0 || panel.content.kind === content.kind)
+  if (panel.bindings.length > 0 || panel.content_selection_pending !== true)
     return false;
   panel.content = { ...content };
+  panel.content_selection_pending = false;
   return true;
 }
 

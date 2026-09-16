@@ -214,7 +214,8 @@
         "stat_columns": "StatColumn[]",
         "stats_sort": "StatColumn?",
         "stats_sort_descending": "bool",
-        "content": "PanelContent"
+        "content": "PanelContent",
+        "content_selection_pending": "bool?"
       }
     },
     "LayoutCell": {

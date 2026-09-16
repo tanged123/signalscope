@@ -17,16 +17,19 @@ test("position stays open, creation uses the selected type, Escape returns focus
     ...host.querySelectorAll<HTMLButtonElement>(".panel-creation-menu button"),
   ];
   buttons()
-    .find((button) => button.textContent.includes("Left"))
+    .find((button) => button.textContent.includes("Down"))
     ?.click();
   expect(anchor.getAttribute("aria-expanded")).toBe("true");
   expect(
-    host.querySelector('[data-position="left"]')?.getAttribute("aria-pressed"),
+    host.querySelector('[data-position="down"]')?.getAttribute("aria-pressed"),
   ).toBe("true");
+  expect(host.querySelector(".panel-creation-destination")?.textContent).toBe(
+    "↓ Adds below <img src=x>",
+  );
   buttons()
     .find((button) => button.dataset.type === "scatter2d")
     ?.click();
-  expect(create).toHaveBeenCalledExactlyOnceWith("left", {
+  expect(create).toHaveBeenCalledExactlyOnceWith("down", {
     kind: "scatter2d",
   });
   expect(document.activeElement).toBe(anchor);
