@@ -1,5 +1,7 @@
 //! Host-independent signal transforms.
 
+pub mod histogram;
+
 /// Sample-wise central-difference derivative, matching MATLAB's `gradient`
 /// for non-uniform spacing: one-sided at the two ends, centered elsewhere.
 ///

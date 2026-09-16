@@ -11,6 +11,10 @@ import type {
   LegendState,
   PanelState,
 } from "../generated/session";
+import {
+  MAX_HISTOGRAM_BIN_COUNT,
+  MIN_HISTOGRAM_BIN_COUNT,
+} from "../app/histogram-settings";
 
 const LEGEND_LABELS: Record<LegendState, string> = {
   badge: "collapsed",
@@ -28,6 +32,8 @@ export interface LineToolbarActions {
   setLegend(state: LegendState): void;
   setTips(display: AnnotationDisplay): void;
   clearTips(): void;
+  setHistogramBins?(count: number): void;
+  canSetHistogramBins?(): boolean;
   beforeOpen(): void;
 }
 
@@ -51,6 +57,7 @@ export class LineToolbar {
         <button class="panel-toolbar-control panel-c-axis" type="button" title="Choose color axis">color: none ▾</button>
         <button class="panel-toolbar-control panel-axis-limits" type="button" title="Axis limits, scales, direction, and equal units" aria-label="Axis settings">limits ▾</button>
       </div></details>
+      <button class="panel-toolbar-control panel-histogram-bins" type="button" aria-label="Histogram bins" hidden>bins: <b class="panel-histogram-bins-value"></b><span class="toolbar-caret">▾</span></button>
       <button class="panel-toolbar-control panel-line-width" type="button" aria-label="Style">style: <b class="panel-line-width-value"></b><span class="panel-ghost-value"></span> <span class="toolbar-caret">▾</span></button>
       <button class="panel-toolbar-control panel-legend-state" type="button" aria-label="Readouts">readouts: <b class="panel-legend-value"></b><span class="panel-readout-value"></span> <span class="toolbar-caret">▾</span></button>`;
     this.axes = required<HTMLDetailsElement>(slot, "details");
@@ -136,6 +143,7 @@ export class LineToolbar {
       );
     };
     bind(".panel-axis-toggle", () => actions.toggleAxes());
+    bind(".panel-histogram-bins", (anchor) => this.openHistogramBins(anchor));
     bind(".panel-line-width", (anchor) => this.openWidth(anchor));
     bind(".panel-legend-state", (anchor) => this.openLegend(anchor));
   }
@@ -153,8 +161,27 @@ export class LineToolbar {
       "Signal assignment, limits, scales, direction, and equal units",
     ].join(" · ");
     const scatter = state.content.kind === "scatter2d";
+    const histogram = state.content.kind === "histogram";
     required(this.host, ".panel-axes-value").textContent =
-      `${scatter ? "scatter · " : ""}${state.axis_style}`;
+      `${scatter ? "scatter · " : histogram ? "histogram · " : ""}${state.axis_style}`;
+    const bins = required<HTMLButtonElement>(
+      this.host,
+      ".panel-histogram-bins",
+    );
+    bins.hidden = !histogram;
+    if (histogram) {
+      const binCount =
+        state.content.kind === "histogram" ? state.content.bin_count : 0;
+      required<HTMLElement>(
+        this.host,
+        ".panel-histogram-bins-value",
+      ).textContent = String(binCount);
+      const writable = this.actions.canSetHistogramBins?.() ?? true;
+      bins.disabled = !writable;
+      bins.title = writable
+        ? "Histogram bin count"
+        : "Histogram bin count is fixed in this offline capture";
+    }
     const width = formatToolbarNumber(state.line_width);
     const dim =
       state.ghost_mode === "all"
@@ -220,6 +247,31 @@ export class LineToolbar {
       })),
       ...this.ghostOptions(state),
     ]);
+  }
+
+  private openHistogramBins(anchor: HTMLElement): void {
+    const state = this.state;
+    if (
+      state === null ||
+      state.content.kind !== "histogram" ||
+      this.actions.canSetHistogramBins?.() === false
+    )
+      return;
+    const values = [1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256].filter(
+      (value) =>
+        value >= MIN_HISTOGRAM_BIN_COUNT && value <= MAX_HISTOGRAM_BIN_COUNT,
+    );
+    const binCount = state.content.bin_count;
+    this.open(
+      anchor,
+      "HISTOGRAM · BINS",
+      values.map((count) => ({
+        section: "Bin count",
+        label: String(count),
+        active: binCount === count,
+        run: () => this.actions.setHistogramBins?.(count),
+      })),
+    );
   }
 
   private ghostOptions(state: PanelState): MenuOption[] {

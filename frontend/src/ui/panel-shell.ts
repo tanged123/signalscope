@@ -1,6 +1,6 @@
 import type { PanelContent } from "../generated/session";
 import { showPanelLayoutMenu } from "./panel-layout-menu";
-import { panelTypeOptions } from "./panel-type-options";
+import { panelContentForType, panelTypeOptions } from "./panel-type-options";
 import { required } from "./dom";
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const SET_DRAG_TYPE = "application/x-signalscope-set";
@@ -202,8 +202,9 @@ export class PanelShell {
       const kind =
         event.target.closest<HTMLButtonElement>("button[data-type]")?.dataset
           .type;
-      if (kind === "line2d" || kind === "scatter2d")
-        this.callbacks.onSetEmptyPanelContent?.(this.id, { kind });
+      const content = panelContentForType(kind ?? "");
+      if (content !== null)
+        this.callbacks.onSetEmptyPanelContent?.(this.id, content);
     });
     this.element.addEventListener("pointerdown", () => {
       if (!this.disposed) this.callbacks.onFocus(this.id);

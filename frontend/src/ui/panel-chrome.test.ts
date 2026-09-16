@@ -392,6 +392,8 @@ describe("PanelView chrome", () => {
         pinned_value: 2,
         label: "",
         offset: [10, -10],
+        histogram_window: null,
+        histogram_bin_count: null,
       },
     ];
     const response: Line2DResponse = {
@@ -602,6 +604,8 @@ describe("PanelView chrome", () => {
         pinned_value: 1.0565,
         label: "",
         offset: [10, -10],
+        histogram_window: null,
+        histogram_bin_count: null,
       },
     ];
     view.update(panel, false);
@@ -637,6 +641,8 @@ describe("PanelView chrome", () => {
         pinned_value: 1.0565,
         label: "",
         offset: [10, -10],
+        histogram_window: null,
+        histogram_bin_count: null,
       },
     ];
     view.update(panel, false);

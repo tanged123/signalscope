@@ -47,7 +47,9 @@ interface Line2DFamily {
   prepare(context: FamilyContext): PreparedLine2DFamily;
 }
 
-export function line2dFamily(data: PanelLineResponse): Line2DFamily {
+export function line2dFamily(
+  data: Exclude<PanelLineResponse, { kind: "histogram" }>,
+): Line2DFamily {
   return data.kind === "time" ? timeFamily(data) : signalXFamily(data);
 }
 

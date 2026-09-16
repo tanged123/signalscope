@@ -9,10 +9,14 @@ use axum::response::IntoResponse;
 use scope_core::compute;
 use scope_core::store::SignalId;
 use scope_protocol::{
-    Envelope, Line2DRequest, SampleRequest, SampleResponse, SampleSeries, TileRequest,
+    Envelope, HistogramRequest, HistogramResponse, HistogramSeries, Line2DRequest, SampleRequest,
+    SampleResponse, SampleSeries, TileRequest,
 };
 use std::collections::BTreeSet;
+use std::mem::size_of;
 use std::sync::Arc;
+
+const MAX_HISTOGRAM_RESULT_BYTES: u64 = 64 * 1024 * 1024;
 
 pub async fn list_sources(State(ctx): State<AppContext>) -> Result<impl IntoResponse, ApiError> {
     let sources = with_state(&ctx, |data| {
@@ -221,6 +225,109 @@ pub async fn query_line2d_bin(
     Ok(([(header::CONTENT_TYPE, "application/octet-stream")], bytes))
 }
 
+/// Computes an exact histogram from source values in an inclusive time window.
+///
+/// Signal handles are cloned while the state mutex is held; the reduction and
+/// page reads happen after releasing it. The semaphore bounds concurrent scans
+/// because a request may touch a large paged source window.
+pub async fn query_histogram(
+    State(ctx): State<AppContext>,
+    Json(request): Json<Envelope<HistogramRequest>>,
+) -> Result<impl IntoResponse, ApiError> {
+    let request = request.open().map_err(|error| err(error.to_string()))?;
+    if request.signal_ids.iter().collect::<BTreeSet<_>>().len() != request.signal_ids.len() {
+        return Err(err("histogram signals must be unique"));
+    }
+    if !request.window.t0.is_finite()
+        || !request.window.t1.is_finite()
+        || request.window.t0 > request.window.t1
+    {
+        return Err(err("histogram window must be finite and ordered"));
+    }
+    if !(1..=scope_core::compute::histogram::MAX_BIN_COUNT).contains(&request.bin_count) {
+        return Err(err(format!(
+            "histogram bin count must be between 1 and {}",
+            scope_core::compute::histogram::MAX_BIN_COUNT
+        )));
+    }
+    let matrix_bytes = u64::from(request.bin_count)
+        .checked_mul(u64::try_from(request.signal_ids.len()).unwrap_or(u64::MAX))
+        .and_then(|count| count.checked_mul(u64::try_from(size_of::<u64>()).unwrap_or(u64::MAX)))
+        .ok_or_else(|| err("histogram result is too large"))?;
+    if matrix_bytes > MAX_HISTOGRAM_RESULT_BYTES {
+        return Err(err(format!(
+            "histogram result exceeds the {} MiB output limit",
+            MAX_HISTOGRAM_RESULT_BYTES / (1024 * 1024)
+        )));
+    }
+
+    // An empty visible set is a valid panel state. Keep the result typed so
+    // the presentation plane can settle on an empty plot without attempting
+    // a native reduction with no signal handles.
+    if request.signal_ids.is_empty() {
+        let edges = Vec::new();
+        return Ok(Json(Envelope::new(HistogramResponse {
+            request_id: request.request_id,
+            window: request.window,
+            edges,
+            series: Vec::new(),
+        })));
+    }
+
+    let permit = ctx
+        .histogram_scans
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|error| err(format!("histogram scan limiter unavailable: {error}")))?;
+    let state = Arc::clone(&ctx.state);
+    let response = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let signals = {
+            let data = state.lock().map_err(|error| error.to_string())?;
+            request
+                .signal_ids
+                .iter()
+                .map(|raw_id| {
+                    data.store
+                        .signal(SignalId(*raw_id))
+                        .cloned()
+                        .ok_or_else(|| format!("unknown signal id: {raw_id}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let references = signals.iter().collect::<Vec<_>>();
+        let result = scope_core::compute::histogram::histogram(
+            &references,
+            request.window.clone(),
+            request.bin_count,
+        )
+        .map_err(|error| error.to_string())?;
+        let series = result
+            .series
+            .into_iter()
+            .map(|series| HistogramSeries {
+                signal_id: series.signal_id.0,
+                signal_path: series.path,
+                unit: series.unit,
+                counts: series.counts,
+                finite_count: series.finite_count,
+                excluded_count: series.excluded_count,
+            })
+            .collect();
+        Ok::<_, String>(HistogramResponse {
+            request_id: request.request_id,
+            window: request.window,
+            edges: result.edges,
+            series,
+        })
+    })
+    .await
+    .map_err(|error| err(error.to_string()))?
+    .map_err(err)?;
+    Ok(Json(Envelope::new(response)))
+}
+
 fn capture_tiles(
     data: &host::DataState,
     ids: &[u64],
@@ -246,12 +353,109 @@ fn capture_tiles(
 #[cfg(test)]
 mod tests {
     use super::capture_tiles;
+    use axum::{body::Body, http::Request};
+    use http_body_util::BodyExt;
     use scope_core::{
         cache::{CacheRoot, spill_columns},
         columns::{Column, TimebaseId},
         pyramid::Pyramid,
         store::SourceKey,
     };
+    use scope_protocol::{Envelope, HistogramRequest, HistogramResponse, TimeWindow};
+    use tower::ServiceExt;
+
+    fn histogram_context() -> (crate::AppContext, Vec<u64>) {
+        let context = crate::AppContext::for_tests(None);
+        let mut data = context.state.lock().unwrap();
+        let source = data
+            .store
+            .register_source(
+                "histogram.csv",
+                SourceKey(uuid::Uuid::new_v4()),
+                "histogram",
+            )
+            .unwrap();
+        let first = data
+            .store
+            .insert_signal(
+                source,
+                "first",
+                Some("V".into()),
+                vec![0.0, 1.0, 2.0, 3.0],
+                vec![-1.0, 0.0, 1.0, f64::NAN],
+            )
+            .unwrap();
+        let second = data
+            .store
+            .insert_signal(
+                source,
+                "second",
+                Some("V".into()),
+                vec![0.0, 1.0, 2.0, 3.0],
+                vec![-2.0, 0.0, 2.0, 3.0],
+            )
+            .unwrap();
+        drop(data);
+        (context, vec![first.0, second.0])
+    }
+
+    #[tokio::test]
+    async fn histogram_endpoint_returns_exact_shared_edges_and_totals() {
+        let (context, ids) = histogram_context();
+        let router = crate::build_router(context);
+        let request = Envelope::new(HistogramRequest {
+            request_id: "hist-1".into(),
+            signal_ids: ids,
+            window: TimeWindow { t0: 0.0, t1: 3.0 },
+            bin_count: 2,
+        });
+        let response = router
+            .oneshot(
+                Request::post("/api/query_histogram")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let response: Envelope<HistogramResponse> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(response.payload.request_id, "hist-1");
+        assert_eq!(response.payload.edges[0].to_bits(), (-2.0_f64).to_bits());
+        assert!((response.payload.edges[1] - 0.5).abs() < 1e-12);
+        assert_eq!(response.payload.edges[2].to_bits(), 3.0_f64.to_bits());
+        assert_eq!(response.payload.series[0].counts, vec![2, 1]);
+        assert_eq!(response.payload.series[0].finite_count, 3);
+        assert_eq!(response.payload.series[0].excluded_count, 1);
+        assert_eq!(response.payload.series[1].counts, vec![2, 2]);
+        assert_eq!(response.payload.series[1].finite_count, 4);
+    }
+
+    #[tokio::test]
+    async fn histogram_endpoint_accepts_empty_visible_sets() {
+        let router = crate::build_router(crate::AppContext::for_tests(None));
+        let request = Envelope::new(HistogramRequest {
+            request_id: "empty".into(),
+            signal_ids: Vec::new(),
+            window: TimeWindow { t0: 4.0, t1: 4.0 },
+            bin_count: 3,
+        });
+        let response = router
+            .oneshot(
+                Request::post("/api/query_histogram")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&request).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let response: Envelope<HistogramResponse> = serde_json::from_slice(&body).unwrap();
+        assert!(response.payload.edges.is_empty());
+        assert!(response.payload.series.is_empty());
+    }
 
     #[test]
     fn captured_queries_survive_reset_and_release_spills_after_the_last_reader() {

@@ -153,13 +153,18 @@ export function showAxisLimits(
   const equal = document.createElement("input");
   equal.type = "checkbox";
   equal.checked = state.axis_equal === true;
+  const histogram = state.content.kind === "histogram";
+  equal.disabled = histogram;
   equalLabel.append(equal, "Axis equal");
   form.append(equalLabel);
   const equalNote = document.createElement("div");
   equalNote.className = "axis-limits-note";
-  equalNote.textContent = "Linear X/Y only.";
+  equalNote.textContent = histogram
+    ? "Histogram axes cannot be equal."
+    : "Linear X/Y only.";
   const updateEqual = (): void => {
     equal.disabled =
+      histogram ||
       controls.get("x")?.scale.value === "log" ||
       controls.get("y")?.scale.value === "log";
     if (equal.disabled) equal.checked = false;

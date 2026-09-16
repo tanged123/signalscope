@@ -65,7 +65,10 @@ export function axisActions(host: AxisActionHost) {
       panel.x_reversed = limits.xReversed === true;
       panel.y_reversed = limits.yReversed === true;
       panel.axis_equal =
-        limits.axisEqual && panel.x_scale !== "log" && panel.y_scale !== "log";
+        panel.content.kind !== "histogram" &&
+        limits.axisEqual &&
+        panel.x_scale !== "log" &&
+        panel.y_scale !== "log";
       if (panel.color_axis != null)
         host.workspace.setPanelColorAxis(id, {
           ...panel.color_axis,

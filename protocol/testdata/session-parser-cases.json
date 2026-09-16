@@ -39,6 +39,58 @@
   },
   "cases": [
     {
+      "name": "histogram content",
+      "session": {},
+      "panel": { "content": { "kind": "histogram", "bin_count": 32 } },
+      "valid": true
+    },
+    {
+      "name": "histogram rejects zero bins",
+      "session": {},
+      "panel": { "content": { "kind": "histogram", "bin_count": 0 } },
+      "valid": false
+    },
+    {
+      "name": "histogram rejects excessive bins",
+      "session": {},
+      "panel": { "content": { "kind": "histogram", "bin_count": 257 } },
+      "valid": false
+    },
+    {
+      "name": "histogram rejects fractional bins",
+      "session": {},
+      "panel": { "content": { "kind": "histogram", "bin_count": 2.5 } },
+      "valid": false
+    },
+    {
+      "name": "histogram requires explicit bins",
+      "session": {},
+      "panel": { "content": { "kind": "histogram" } },
+      "valid": false
+    },
+    {
+      "name": "histogram rejects equal axis units",
+      "session": {},
+      "panel": {
+        "content": { "kind": "histogram", "bin_count": 32 },
+        "axis_equal": true
+      },
+      "valid": false
+    },
+    {
+      "name": "histogram rejects color axis",
+      "session": {},
+      "panel": {
+        "content": { "kind": "histogram", "bin_count": 32 },
+        "color_axis": {
+          "source": { "kind": "time" },
+          "range": null,
+          "label": null
+        }
+      },
+      "valid": false
+    },
+    {
       "name": "independent axis reversal",
       "session": {},
       "panel": {

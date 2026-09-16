@@ -35,6 +35,8 @@ interface PlotReadingRow {
   path: string;
   label: string;
   value: number;
+  /** Exact text for aggregate values whose wire representation is an integer. */
+  exactValue?: string;
   unit: string | null;
   colorIndex: number;
 }
@@ -52,6 +54,9 @@ export interface AnnotationAnchor {
   anchor: number;
   x: number;
   pinnedValue: number;
+  /** Histogram pins retain the source interval and result resolution. */
+  histogramWindow?: [number, number] | null;
+  histogramBinCount?: number | null;
 }
 
 export interface ResolvedAnnotation {
@@ -60,6 +65,7 @@ export interface ResolvedAnnotation {
   y: number;
   colorIndex: number;
   summary: string;
+  exactValue?: string;
   colorValue: number | null;
 }
 
@@ -73,6 +79,8 @@ interface PlotStat {
   label: string;
   value: number | null;
   unit: string | null;
+  /** Optional exact text for integer statistics crossing the wire as u64. */
+  exactValue?: string;
 }
 
 interface PlotStatGroup {

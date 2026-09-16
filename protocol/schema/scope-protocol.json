@@ -449,13 +449,51 @@
         "levels": "BakedLine2DLevel[]"
       }
     },
+    "HistogramRequest": {
+      "kind": "object",
+      "fields": {
+        "request_id": "string",
+        "signal_ids": "u64[]",
+        "window": "TimeWindow",
+        "bin_count": "u32"
+      }
+    },
+    "HistogramSeries": {
+      "kind": "object",
+      "fields": {
+        "signal_id": "u64",
+        "signal_path": "string",
+        "unit": "string?",
+        "counts": "u64[]",
+        "finite_count": "u64",
+        "excluded_count": "u64"
+      }
+    },
+    "HistogramResponse": {
+      "kind": "object",
+      "fields": {
+        "request_id": "string",
+        "window": "TimeWindow",
+        "edges": "f64[]",
+        "series": "HistogramSeries[]"
+      }
+    },
+    "BakedHistogram": {
+      "kind": "object",
+      "fields": {
+        "panel_id": "string",
+        "bin_count": "u32",
+        "response": "HistogramResponse"
+      }
+    },
     "SnapshotManifest": {
       "kind": "object",
       "fields": {
         "session_json": "string",
         "preferences_json": "string?",
         "signals": "BakedSignal[]",
-        "line2d": "BakedLine2D[]?"
+        "line2d": "BakedLine2D[]?",
+        "histograms": "BakedHistogram[]?"
       }
     }
   }

@@ -1,5 +1,8 @@
 import {
   type BakedLine2DLevel,
+  type BakedHistogram,
+  type HistogramRequest,
+  type HistogramResponse,
   type BatchDetail,
   type BatchJob,
   type BatchStatus,
@@ -40,6 +43,11 @@ import { queryAdaptivePyramidRange } from "./pyramid-query";
 import { binsToSamples, sampleWindow, sampleWindowFull } from "./samples";
 import { decodeTileResponse } from "./tile-binary";
 import { decodeLineResponse, type Line2DResponse } from "./line-binary";
+import {
+  validateHistogramResponse,
+  validateHistogramCaptures,
+  queryCapturedHistogram,
+} from "./histogram-data";
 
 export interface IngestPort {
   pickSources(): Promise<string[]>;
@@ -120,6 +128,7 @@ export interface ExportPort {
 }
 
 export interface DataPlane {
+  readonly histogramCaptures?: readonly BakedHistogram[];
   readonly sourceLabel: string;
   readonly ingest: IngestPort | null;
   readonly derived: DerivedPort | null;
@@ -140,12 +149,18 @@ export interface DataPlane {
     signal?: AbortSignal,
   ): Promise<Line2DResponse>;
   querySamples(request: SampleRequest): Promise<SampleResponse>;
+  queryHistogram(
+    request: HistogramRequest,
+    signal?: AbortSignal,
+  ): Promise<HistogramResponse>;
 }
 
 type BakedManifest = Envelope<SnapshotManifest>;
 type BakedManifestInput = Envelope<
-  Omit<SnapshotManifest, "line2d" | "preferences_json"> &
-    Partial<Pick<SnapshotManifest, "line2d" | "preferences_json">>
+  Omit<SnapshotManifest, "line2d" | "preferences_json" | "histograms"> &
+    Partial<
+      Pick<SnapshotManifest, "line2d" | "preferences_json" | "histograms">
+    >
 >;
 
 export class HttpPlane implements DataPlane {
@@ -340,11 +355,28 @@ export class HttpPlane implements DataPlane {
     };
   }
 
-  private async post<T>(path: string, payload?: unknown): Promise<T> {
+  async queryHistogram(
+    request: HistogramRequest,
+    signal?: AbortSignal,
+  ): Promise<HistogramResponse> {
+    const response = await this.post<unknown>(
+      "query_histogram",
+      request,
+      signal,
+    );
+    return validateHistogramResponse(response, request);
+  }
+
+  private async post<T>(
+    path: string,
+    payload?: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
     const response = await this.fetcher(`/api/${path}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: payload === undefined ? null : JSON.stringify(seal(payload)),
+      signal: signal ?? null,
     });
     if (!response.ok) {
       throw new Error(await response.text());
@@ -371,6 +403,7 @@ export class HttpPlane implements DataPlane {
 }
 
 export class BakedPlane implements DataPlane {
+  readonly histogramCaptures: readonly BakedHistogram[];
   readonly sourceLabel = "baked demo source";
 
   readonly ingest = null;
@@ -403,6 +436,7 @@ export class BakedPlane implements DataPlane {
 
   constructor(manifest: BakedManifestInput) {
     this.payload = open(manifest) as BakedManifest["payload"];
+    this.histogramCaptures = validateHistogramCaptures(this.payload.histograms);
     this.bakedSessionJson = this.payload.session_json;
     if (this.payload.preferences_json != null) {
       this.bakedPreferencesJson = this.payload.preferences_json;
@@ -418,6 +452,16 @@ export class BakedPlane implements DataPlane {
       return new BakedPlane(JSON.parse(value) as BakedManifest);
     }
     return new BakedPlane(createDemoManifest());
+  }
+
+  queryHistogram(
+    request: HistogramRequest,
+    signal?: AbortSignal,
+  ): Promise<HistogramResponse> {
+    return Promise.resolve().then(() => {
+      signal?.throwIfAborted();
+      return queryCapturedHistogram(this.histogramCaptures, request);
+    });
   }
 
   listSignals(): Promise<SignalSummary[]> {
@@ -816,6 +860,7 @@ function createDemoManifest(): BakedManifest {
       levels: buildDemoLevels(makeBins(generate)),
     })),
     line2d: null,
+    histograms: null,
   });
 }
 

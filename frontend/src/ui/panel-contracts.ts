@@ -90,6 +90,8 @@ export interface PanelCallbacks {
     dimension: StyleDimension | null,
   ): void;
   onSetPanelLineWidth(id: string, width: number): void;
+  onSetHistogramBins?(id: string, count: number): void;
+  canSetHistogramBins?(id: string): boolean;
   onSetGhostOpacity(id: string, opacity: number): void;
   onSetStatColumns(id: string, columns: StatColumn[]): void;
   onSetStatsSort(

@@ -35,7 +35,7 @@ pub async fn export_write(
         .map_err(|error| err(error.to_string()))?;
     let session =
         session::from_json(&request.session_json).map_err(|error| err(error.to_string()))?;
-    let mut manifest = {
+    let (mut manifest, histogram_captures) = {
         let data = ctx.state.lock().map_err(|error| err(error.to_string()))?;
         let export = snapshot::plan_selected(
             &session,
@@ -46,8 +46,29 @@ pub async fn export_write(
             request.fidelity,
         )
         .map_err(|error| err(error.to_string()))?;
-        snapshot::bake(&export, &session).map_err(|error| err(error.to_string()))?
+        let captures = snapshot::clone_histogram_captures(&export);
+        let manifest = snapshot::bake_without_histograms(&export, &session)
+            .map_err(|error| err(error.to_string()))?;
+        (manifest, captures)
     };
+    if histogram_captures.is_empty() {
+        manifest.histograms = None;
+    } else {
+        let permit = ctx
+            .histogram_scans
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|error| err(format!("histogram scan limiter unavailable: {error}")))?;
+        let histograms = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            snapshot::bake_histograms_owned(&histogram_captures)
+        })
+        .await
+        .map_err(|error| err(error.to_string()))?
+        .map_err(|error| err(error.to_string()))?;
+        manifest.histograms = Some(histograms);
+    }
     manifest.preferences_json = request.preferences_json;
     let html = snapshot::inject(&template, manifest).map_err(|error| err(error.to_string()))?;
     write_export_file(&path, &html).map_err(|error| err(error.to_string()))?;

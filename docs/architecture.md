@@ -59,6 +59,16 @@ attribute owner compacts RGBA with finite XY rows, while the shared point-color
 buffer owner retains uploads across viewport changes and releases replacements.
 Stored scatter widths are CSS pixel diameters; ChartHost converts to GPU radii.
 
+Histogram content uses the exact `query_histogram` presentation read, separate
+from time envelopes and paired rows. `scope-core::compute::histogram` owns
+inclusive source-window scanning, shared edges, and exact counts. Histogram
+preparation consumes that result and emits step-line geometry with local value
+axes; it never creates source observations from aggregate bins. The application
+controller retains the last result and its analyzed interval while replacing it
+atomically. Captured histograms are immutable analysis data exposed by the
+data-plane capability; offline camera and inspection use the same presentation
+path. See [ADR 0067](adr/0067-exact-histogram-panels.md).
+
 ## System boundaries
 
 Arrows below mean **depends on**, not data flow. This is the crate/host boundary;
@@ -265,7 +275,7 @@ adding a subclass. `PanelShell` is a reuse candidate for chrome. Legend geometry
 is reusable where its interaction contract fits, not guaranteed unchanged for
 every plot.
 
-The panel-content union represents the two implemented Cartesian types.
+The panel-content union represents Line2D, Scatter2D, and Histogram content.
 Build one vertical slice through live data, presentation, persistence, and bake
 before extracting a generalized family registry. Estimate cost from required
 algorithms and validation; historical lines of code are not an engineering

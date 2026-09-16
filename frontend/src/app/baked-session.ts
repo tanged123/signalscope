@@ -211,6 +211,12 @@ function isAnnotation(value: unknown): boolean {
       isNullable(value.pinned_x, (item) => typeof item === "number")) &&
     typeof value.pinned_value === "number" &&
     typeof value.label === "string" &&
+    (value.histogram_window == null ||
+      (isNumberPair(value.histogram_window) &&
+        value.histogram_window.every(Number.isFinite) &&
+        value.histogram_window[0] <= value.histogram_window[1])) &&
+    (value.histogram_bin_count == null ||
+      validHistogramBins(value.histogram_bin_count)) &&
     isNumberPair(value.offset)
   );
 }
@@ -222,9 +228,10 @@ function normalizeOptionalAnnotationFields(session: JsonObject): void {
     for (const panel of tab.panels) {
       if (!isRecord(panel) || !Array.isArray(panel.annotations)) continue;
       for (const annotation of panel.annotations) {
-        if (isRecord(annotation) && annotation.pinned_x === undefined) {
-          annotation.pinned_x = null;
-        }
+        if (!isRecord(annotation)) continue;
+        annotation.pinned_x ??= null;
+        annotation.histogram_window ??= null;
+        annotation.histogram_bin_count ??= null;
       }
     }
   }
@@ -275,14 +282,31 @@ function isStatColumn(value: unknown): boolean {
   );
 }
 
+function validHistogramBins(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= 256
+  );
+}
+
 function isPanel(value: unknown): boolean {
   const stringOrNull = (item: unknown): item is string =>
     typeof item === "string";
   return (
     isRecord(value) &&
     isRecord(value.content) &&
-    Object.keys(value.content).length === 1 &&
-    (value.content.kind === "line2d" || value.content.kind === "scatter2d") &&
+    (value.content.kind === "histogram"
+      ? Object.keys(value.content).length === 2 &&
+        validHistogramBins(value.content.bin_count) &&
+        isRecord(value.x_axis) &&
+        value.x_axis.kind === "time" &&
+        value.color_axis == null &&
+        value.axis_equal !== true
+      : Object.keys(value.content).length === 1 &&
+        (value.content.kind === "line2d" ||
+          value.content.kind === "scatter2d")) &&
     (value.content_selection_pending == null ||
       typeof value.content_selection_pending === "boolean") &&
     typeof value.id === "string" &&

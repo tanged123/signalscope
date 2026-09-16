@@ -1,6 +1,10 @@
 # ADR 0052: Typed plot families and the explicit-X Line2D foundation
 
 - Status: Accepted
+
+Histogram content and exact distribution queries are added by
+[ADR 0067](0067-exact-histogram-panels.md).
+
 - Date: 2026-09-03
 - Amends: ADRs 0043 and 0045
 
