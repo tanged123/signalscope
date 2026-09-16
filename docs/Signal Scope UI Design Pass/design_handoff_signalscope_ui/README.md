@@ -52,7 +52,7 @@ App shell rows: menu bar 28px · toolbar 34px · [tree 262px | panel grid] · fo
 
 Panel creation keeps five top-right buttons (ADR 0066): add left, add right,
 minimize, maximize, and a dropdown. In the dropdown choose
-Left/Right, then Time series/Scatter; minimize restores the grid from a
+Left/Right, then 2D line/Scatter; minimize restores the grid from a
 maximized panel. Close remains in the dropdown. Only implemented types are offered.
 
 ## Axes (final — see F2, F3, and F6 cards)

@@ -12,7 +12,7 @@ test("N creates an empty panel with keyboard-accessible type choices before sign
   const id = await panel.getAttribute("data-panel-id");
   const choices = panel.getByRole("group", { name: "Panel type", exact: true });
   const scatter = choices.getByRole("button", { name: /^Scatter/ });
-  const line = choices.getByRole("button", { name: /^Time series/ });
+  const line = choices.getByRole("button", { name: /^2D line/ });
   await expect(line).toHaveAttribute("aria-pressed", "true");
   await scatter.focus();
   await page.keyboard.press("Enter");

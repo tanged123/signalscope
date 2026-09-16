@@ -38,7 +38,7 @@ export async function panelLayoutAction(
 
 export async function addPanel(
   panel: Locator,
-  type = "Time series",
+  type = "2D line",
   position = "Right",
 ): Promise<void> {
   await panel.locator(".panel-layout").click();

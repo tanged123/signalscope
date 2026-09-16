@@ -12,7 +12,7 @@ are recorded in [ADRs](adr/README.md).
 
 ## Current product
 
-- Panel layout menus create Time series or Scatter to the left or right.
+- Panel layout menus create 2D line or Scatter to the left or right.
   Empty panels also offer an inline type choice before signals are assigned,
   including panels created with N in a new workspace.
   Creation restores a maximized grid and focuses the new panel. Scatter plots

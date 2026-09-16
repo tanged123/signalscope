@@ -29,7 +29,7 @@ unavailable action disabled. Closing retains existing workspace behavior and
 remains available in the dropdown. Only implemented types appear in the menu.
 
 Empty panels, including those created with N in a new workspace, offer the
-same illustrated Time series/Scatter choices in the plot area. Time series
+same illustrated 2D line/Scatter choices in the plot area. 2D line
 starts selected so direct signal drops still work. Choosing a type updates the
 existing panel in place, retaining ID, layout, and axis settings. The choice
 remains available until a binding is assigned. `app/panel-content.ts` rejects
