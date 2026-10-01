@@ -21,8 +21,13 @@ frontend_checks() {
   pnpm lint
   node --test frontend/scripts/check-architecture.mjs
   pnpm codegen:check
-  pnpm --filter @signalscope/frontend exec tsc --noEmit --project vendor/chartgpu/tsconfig.json
   pnpm test
+}
+
+# The pinned ChartGPU fork's typecheck and suite; they change only with the fork.
+chartgpu_checks() {
+  pnpm --filter @signalscope/frontend exec tsc --noEmit --project vendor/chartgpu/tsconfig.json
+  pnpm --filter @signalscope/frontend exec vitest run --project chartgpu
 }
 
 desktop_checks() {

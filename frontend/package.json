@@ -13,8 +13,8 @@
     "dev": "vite --host 127.0.0.1 --port 4173",
     "e2e": "playwright test --project=desktop",
     "lint": "eslint src tests",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage --maxWorkers=1",
+    "test": "vitest run --project app",
+    "test:coverage": "vitest run --project app --coverage --maxWorkers=1",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

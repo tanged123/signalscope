@@ -19,7 +19,7 @@ Usage: ./scripts/test.sh [quick|core|server|desktop|unit|chartgpu|architecture|f
   server    Test the browser host server, optionally filtered.
   desktop   Test the Electron shell; pass package to smoke-test a built package.
   unit      Run frontend unit tests, optionally filtered.
-  chartgpu  Typecheck and test the ChartGPU fork.
+  chartgpu  Typecheck and test the vendored ChartGPU fork.
   architecture  Check frontend import-boundary rules against allowed/forbidden examples.
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
             snapshot artifact checks.
@@ -95,7 +95,7 @@ test_desktop() {
 }
 
 test_unit() {
-  pnpm --filter @signalscope/frontend exec vitest run "$@"
+  pnpm --filter @signalscope/frontend exec vitest run --project app "$@"
 }
 
 test_frontend() {
@@ -180,8 +180,7 @@ unit)
   test_unit "$@"
   ;;
 chartgpu)
-  pnpm --filter @signalscope/frontend exec tsc --noEmit --project vendor/chartgpu/tsconfig.json
-  test_unit vendor/chartgpu/src
+  chartgpu_checks
   ;;
 architecture)
   node --test frontend/scripts/check-architecture.mjs
