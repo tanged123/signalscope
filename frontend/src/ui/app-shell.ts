@@ -210,11 +210,11 @@ export class AppShell {
   private historyGestureKey: string | null = null;
   private historyDirty: string | null = null;
   private historyCoalesceTimer: number | null = null;
+  private gpu: GpuContext | null = null;
 
   constructor(
     private readonly root: HTMLElement,
     private readonly plane: DataPlane,
-    private gpu: GpuContext | null = null,
     private readonly requestGpuRecovery: (() => void) | null = null,
   ) {
     this.presentation = new LinePresentationController(this.plane, {
@@ -254,7 +254,9 @@ export class AppShell {
     });
     const warning = this.root.querySelector<HTMLElement>(".gpu-warning");
     if (warning !== null) warning.hidden = true;
-    this.workspaceView?.setGpu(gpu, this.signals.length > 0);
+    // Before mount there are no views; mount plans its requests with this GPU.
+    if (this.workspaceView === null) return;
+    this.workspaceView.setGpu(gpu, this.signals.length > 0);
     void this.refreshTiles();
   }
 
@@ -296,13 +298,14 @@ export class AppShell {
   }
 
   async mount(): Promise<void> {
-    await this.prepareMount();
+    const signalsListed = await this.prepareMount();
     this.mountWorkspaceViews();
     this.mountChromeControllers();
-    await this.loadMountedWorkspace();
+    await this.loadMountedWorkspace(signalsListed);
   }
 
-  private async prepareMount(): Promise<void> {
+  /** Restores the session before the views mount; true once its signals are listed. */
+  private async prepareMount(): Promise<boolean> {
     delete this.root.dataset.ready;
     this.root.innerHTML = shellMarkup();
     this.bindGpuWarning();
@@ -317,12 +320,21 @@ export class AppShell {
       });
     }
     await this.loadPreferences();
-    await this.restoreSession();
+    const baked = this.plane.bakedSessionJson;
+    let signalsListed = false;
+    if (baked !== undefined && baked !== "") {
+      this.workspace.replace(parseBakedSession(baked));
+    } else {
+      // Panels refresh once, after mount; refreshing here as well would query
+      // every panel twice.
+      signalsListed = await this.restoreSessionState(null);
+    }
     this.history.reset(historySnapshot(this.workspace.snapshot()));
     this.restoreTheme();
     if (this.plane.derived === null) {
       required<HTMLElement>(this.root, ".formula-toggle").hidden = true;
     }
+    return signalsListed;
   }
 
   private mountWorkspaceViews(): void {
@@ -772,8 +784,9 @@ export class AppShell {
     this.renderWindowReadout();
   }
 
-  private async loadMountedWorkspace(): Promise<void> {
-    await this.reloadSignals();
+  private async loadMountedWorkspace(signalsListed: boolean): Promise<void> {
+    if (signalsListed) this.publishCatalog();
+    else await this.reloadSignals();
     this.root.dataset.ready = "true";
     if (this.signals.length > 0 && this.workspace.panels().length === 0) {
       const panel = this.workspace.addPanelRow();
@@ -2038,15 +2051,6 @@ export class AppShell {
   }
 
   /** Restores the baked snapshot session or the autosaved session. */
-  private async restoreSession(): Promise<void> {
-    const baked = this.plane.bakedSessionJson;
-    if (baked !== undefined && baked !== "") {
-      this.workspace.replace(parseBakedSession(baked));
-      return;
-    }
-    await this.loadSession(null);
-  }
-
   private async saveWorkspace(saveAs: boolean): Promise<void> {
     const port = this.plane.session;
     if (port === null) return;
@@ -2383,8 +2387,19 @@ export class AppShell {
    * stay recorded; their panels show the unresolved-signal empty state.
    */
   async loadSession(path: string | null): Promise<void> {
+    if (!(await this.restoreSessionState(path))) return;
+    this.afterLayoutChange();
+    this.dirty = false;
+    this.renderWorkspaceName();
+  }
+
+  /**
+   * Restores a session and its signals without presenting it, so the caller
+   * refreshes the panels once. Reports failures and returns false.
+   */
+  private async restoreSessionState(path: string | null): Promise<boolean> {
     const port = this.plane.session;
-    if (port === null) return;
+    if (port === null) return false;
     const progress = required<HTMLElement>(this.root, ".ingest-progress");
     try {
       if (this.autosaveTimer !== null) {
@@ -2428,8 +2443,9 @@ export class AppShell {
       await this.reloadSignals();
 
       const derivedPort = this.plane.derived;
-      if (derivedPort !== null) {
-        for (const definition of [...this.workspace.derivedBundles()]) {
+      const bundles = [...this.workspace.derivedBundles()];
+      if (derivedPort !== null && bundles.length > 0) {
+        for (const definition of bundles) {
           try {
             await derivedPort.createBundle(definition.name, definition.expr);
           } catch {
@@ -2437,7 +2453,10 @@ export class AppShell {
           }
         }
         await this.reloadSignals();
-        for (const definition of [...this.workspace.derived()]) {
+      }
+      const derived = [...this.workspace.derived()];
+      if (derivedPort !== null && derived.length > 0) {
+        for (const definition of derived) {
           try {
             await derivedPort.create(definition.path, definition.expr);
           } catch {
@@ -2446,12 +2465,10 @@ export class AppShell {
         }
         await this.reloadSignals();
       }
-
-      this.afterLayoutChange();
-      this.dirty = false;
-      this.renderWorkspaceName();
+      return true;
     } catch (error: unknown) {
       this.reportError(error);
+      return false;
     } finally {
       progress.hidden = true;
     }
@@ -2586,6 +2603,12 @@ export class AppShell {
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
     );
+    this.publishCatalog();
+    this.updateStatus();
+  }
+
+  /** Hands the current signal catalog to the mounted views. */
+  private publishCatalog(): void {
     this.outline?.setCatalog(this.catalog);
     this.outline?.setFilter(
       required<HTMLInputElement>(this.root, ".signal-search").value,
@@ -2595,7 +2618,6 @@ export class AppShell {
     this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
     this.formulaBar?.setBundles(bundleCompletionEntries(this.signals));
     this.renderSearchStatus();
-    this.updateStatus();
   }
 
   private refreshTiles(): Promise<void> {

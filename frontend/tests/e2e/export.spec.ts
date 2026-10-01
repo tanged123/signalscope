@@ -61,10 +61,19 @@ test("an HTML snapshot reproduces every plot type offline", async ({
     }),
   );
   const errors = pageErrors(page);
+  const queries: string[] = [];
+  page.on("request", (sent) => {
+    if (sent.url().includes("/api/query_"))
+      queries.push(
+        `${sent.url()} ${(sent.postData() ?? "").replace(/"request_id":"[^"]*"/, "")}`,
+      );
+  });
   await installPlotReadback(page);
   await openWorkbench(page, server.url);
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   const live = await frames(page);
+  // Loading the session asks the server for each panel's data once.
+  expect(queries).toHaveLength(TITLES.length);
 
   await exportFrom(page, /HTML Snapshot/);
   const html = readdirSync(server.dialogs).find((name) =>
