@@ -203,7 +203,7 @@ function histogramColumn(
     const y = axisCoordinate(count, yScale);
     data[offset] = Number.isFinite(leftX) ? leftX - xOrigin : 0;
     data[offset + 1] = Number.isFinite(leftX) ? baseline : NaN;
-    data[offset + 2] = data[offset] as number;
+    data[offset + 2] = data[offset];
     data[offset + 3] = Number.isFinite(leftX) ? y : NaN;
     data[offset + 4] = Number.isFinite(rightX) ? rightX - xOrigin : 0;
     data[offset + 5] = Number.isFinite(rightX) ? y : NaN;

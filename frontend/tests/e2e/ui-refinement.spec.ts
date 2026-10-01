@@ -144,37 +144,92 @@ test("bulk actions preserve selection and visibility across legend modes", async
 }) => {
   const firstPanel = await openWorkspace(page);
   const row = (index: number) => seriesRow(firstPanel, index);
-  const actions = firstPanel.getByRole("group", {
-    name: "All plot signals",
+  const selectedActions = firstPanel.getByRole("group", {
+    name: "Selected plot signals",
     exact: true,
   });
-  await actions
-    .getByRole("button", { name: "Select all", exact: true })
-    .click();
   await expect(
-    actions.getByRole("button", { name: "Clear selection", exact: true }),
+    selectedActions.getByRole("button", {
+      name: "Clear selection",
+      exact: true,
+    }),
   ).toBeVisible();
-  await actions.getByRole("button", { name: "Dim all", exact: true }).focus();
+  await selectedActions
+    .getByRole("button", { name: "Dim selected", exact: true })
+    .focus();
   await page.keyboard.press("Enter");
   await expect(
-    actions.getByRole("button", { name: "Undim all", exact: true }),
+    selectedActions.getByRole("button", {
+      name: "Undim selected",
+      exact: true,
+    }),
   ).toBeFocused();
   await expect(row(1)).toHaveClass(/focused/);
   await expect(row(1)).toHaveAttribute("data-dimmed", "true");
   await expect(row(2)).toHaveAttribute("data-hidden", "true");
-  await actions.getByRole("button", { name: "Hide all", exact: true }).click();
+  await selectedActions
+    .getByRole("button", { name: "Hide selected", exact: true })
+    .click();
   await expect(row(1)).toHaveAttribute("data-hidden", "true");
   await expect(row(1)).toHaveClass(/focused/);
-  await actions.getByRole("button", { name: "Show all", exact: true }).click();
+  await expect(row(4)).toHaveAttribute("data-hidden", "false");
+  await selectedActions
+    .getByRole("button", { name: "Show selected", exact: true })
+    .click();
   await expect(row(2)).toHaveAttribute("data-hidden", "false");
   await expect(row(2)).toHaveAttribute("data-dimmed", "true");
-  await actions.getByRole("button", { name: "Undim all", exact: true }).click();
+  await expect(row(3)).toHaveAttribute("data-hidden", "true");
+  await selectedActions
+    .getByRole("button", { name: "Undim selected", exact: true })
+    .click();
   await expect(row(1)).toHaveAttribute("data-dimmed", "false");
-  await actions
+  await expect(row(4)).toHaveAttribute("data-dimmed", "true");
+  await selectedActions
     .getByRole("button", { name: "Clear selection", exact: true })
     .click();
   await expect(row(1)).not.toHaveClass(/focused/);
   await expect(row(1)).toHaveAttribute("data-hidden", "false");
+
+  const allActions = firstPanel.getByRole("group", {
+    name: "All plot signals",
+    exact: true,
+  });
+  await expect(row(1)).toHaveAttribute("data-dimmed", "true");
+  await allActions
+    .getByRole("button", { name: "Undim all", exact: true })
+    .focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    allActions.getByRole("button", { name: "Dim all", exact: true }),
+  ).toBeFocused();
+  await expect(row(4)).toHaveAttribute("data-dimmed", "false");
+  await allActions
+    .getByRole("button", { name: "Dim all", exact: true })
+    .click();
+  await expect(row(1)).toHaveAttribute("data-dimmed", "true");
+  await expect(row(3)).toHaveAttribute("data-hidden", "true");
+  await allActions
+    .getByRole("button", { name: "Hide all", exact: true })
+    .click();
+  await expect(row(4)).toHaveAttribute("data-hidden", "true");
+  await allActions
+    .getByRole("button", { name: "Show all", exact: true })
+    .click();
+  await expect(row(3)).toHaveAttribute("data-hidden", "false");
+  await expect(row(3)).toHaveAttribute("data-dimmed", "true");
+  await allActions
+    .getByRole("button", { name: "Undim all", exact: true })
+    .click();
+  await expect(row(4)).toHaveAttribute("data-dimmed", "false");
+  await allActions
+    .getByRole("button", { name: "Select all", exact: true })
+    .click();
+  await expect(row(3)).toHaveClass(/focused/);
+  await expect(row(3)).toHaveAttribute("data-hidden", "false");
+  await selectedActions
+    .getByRole("button", { name: "Clear selection", exact: true })
+    .click();
+  await expect(row(3)).not.toHaveClass(/focused/);
 
   await firstPanel.locator(".panel-legend-state").click();
   await firstPanel
