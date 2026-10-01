@@ -97,7 +97,6 @@ import {
 export {
   dragData,
   hasDragType,
-  MAXIMIZE_GLYPH,
   PANEL_DRAG_TYPE,
   parseSetPayload,
   parseSignalPayload,
@@ -105,8 +104,6 @@ export {
   SET_DRAG_TYPE,
   SIGNAL_DRAG_TYPE,
 } from "./panel-shell";
-
-export const MAX_SERIES_PER_PANEL = 64;
 
 export type PanelCursor = PlotCursor;
 
@@ -146,9 +143,7 @@ export interface BindingChipEntry {
   selector: string | null;
 }
 
-export { aggregateLegendStats } from "./legend-stats";
-
-export function seriesLegendRows(
+function seriesLegendRows(
   catalog: Catalog,
   state: Pick<RenderPanelState, "series" | "focus">,
   query = "",
@@ -197,7 +192,7 @@ export function seriesLegendRows(
   );
 }
 
-export function bindingChipEntries(
+function bindingChipEntries(
   catalog: Catalog,
   state: Pick<RenderPanelState, "bindings">,
   namedSets: readonly NamedSet[],

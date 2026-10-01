@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
-const coverage = process.env.SIGNALSCOPE_COVERAGE === "1";
+const lineGpu = process.env.SIGNALSCOPE_LINE_GPU_BENCH === "1";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -12,23 +12,10 @@ export default defineConfig({
   // SwiftShader can briefly reject a context while the preceding test's GPU
   // device is being released. Retry the isolated test with a fresh context.
   retries: process.env.CI ? 2 : 0,
-  metadata: {
-    coverage,
-  },
-  reporter: coverage
-    ? [
-        ["list"],
-        [
-          "json",
-          {
-            outputFile: "../build/coverage/frontend/playwright.json",
-          },
-        ],
-      ]
-    : "list",
+  reporter: "list",
   use: {
-    baseURL: "http://127.0.0.1:4173",
     headless: true,
+    actionTimeout: 15_000,
     trace: "retain-on-failure",
     launchOptions: {
       // Enable headless GPU presentation and share SwANGLE’s Vulkan context
@@ -45,7 +32,11 @@ export default defineConfig({
     },
   },
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "desktop",
+      testIgnore: /electron-packaged\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
     {
       name: "electron-packaged",
       testMatch: /electron-packaged\.spec\.ts/,
@@ -53,19 +44,22 @@ export default defineConfig({
     {
       name: "bench",
       testDir: "./tests/bench",
+      // The line-strip fixture needs Vite; run it via `./scripts/test.sh bench line-gpu`.
+      testIgnore: lineGpu ? undefined : /line-strip\.spec\.ts/,
       use: {
         ...devices["Desktop Chrome"],
+        baseURL: "http://127.0.0.1:4173",
         viewport: { width: 1280, height: 800 },
       },
     },
   ],
-  webServer:
-    process.env.SIGNALSCOPE_BENCH === "1" ||
-    process.env.SIGNALSCOPE_PACKAGE_SMOKE === "1"
-      ? undefined
-      : {
-          command: "pnpm dev",
-          url: "http://127.0.0.1:4173",
-          reuseExistingServer: !process.env.CI,
-        },
+  // Only the line-strip GPU fixture is served by Vite; journeys run the
+  // built app from scope-server and benches open baked snapshots.
+  webServer: lineGpu
+    ? {
+        command: "pnpm dev",
+        url: "http://127.0.0.1:4173",
+        reuseExistingServer: !process.env.CI,
+      }
+    : undefined,
 });

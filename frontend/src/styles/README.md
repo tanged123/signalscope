@@ -120,16 +120,8 @@ styles to live and baked workspaces.
 
 ## Verification
 
-Theme tests cover preview/root agreement, secondary text contrast, and selected
-and hover text contrast across all six themes. Browser tests exercise search
-focus, inline controls, unchanged geometry between themes, UI font preferences,
-and enlarged text at narrower desktop widths. The theme matrix attaches review
-screenshots to the GitHub CI `playwright-results` artifact on successful runs as
-well as failures. Existing browser and snapshot tests cover legend interactions,
-palette independence, and offline appearance round trips.
-The packaged Electron smoke test waits for application readiness and checks
-that the native window background follows the active `--surface-1` token after
-keyboard theme changes.
-
-The [before/after review](../../../docs/ui-refinement/README.md) records the
-dense workspace, font sizes, and capture command for this refinement.
+Styles are verified by using the app. The export journey checks that offline
+snapshots reproduce live plot appearance, including theme, stroke scale and
+palette. The packaged Electron smoke test waits for application readiness and
+checks that the native window background follows the active `--surface-1`
+token after keyboard theme changes.

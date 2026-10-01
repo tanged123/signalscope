@@ -154,11 +154,8 @@ registers its own capturing `pointerdown` dismissal. Promote the panel version
 to `ui/anchored-menu.ts` and have the other two use it. Panel's seven
 `open*Menu` call sites already have the right shape and do not change.
 
-**D5 — test fixtures.** `signal()`, `sourceSummary()`, `state()`, `callbacks()`,
-and `mockCanvas()` are redeclared across `app-shell.test.ts`,
-`panel-chrome.test.ts`, `panel.test.ts`, and `workspace.test.ts`. Consolidate
-into `frontend/src/test-support/`. Four test files exceed a thousand lines
-largely because of this.
+**D5 — test fixtures.** Withdrawn: the jsdom panel and shell tests that
+redeclared these fixtures were deleted in favour of Playwright journeys.
 
 ### What is not decided
 

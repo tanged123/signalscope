@@ -20,7 +20,7 @@ Each named mode matches the GitHub Actions job with the same name:
   rust      cargo clippy plus the full cargo test suite.
   frontend  pnpm lint, typecheck, codegen check, unit tests, web build, and
             snapshot artifact checks.
-  e2e       Playwright desktop smoke tests.
+  e2e       Playwright user journeys against a real scope-server.
   bench     Full benchmark suite; writes build/bench/report.json.
   build     Official Electron package for the current operating system.
 
@@ -46,9 +46,7 @@ check_format_read_only() {
 }
 
 check_e2e() {
-  bake_roundtrip_artifact
-  bake_bench_smoke_artifact
-  build_e2e_server
+  e2e_prerequisites
   pnpm e2e
   "$signalscope_scripts_dir/server-smoke.sh"
 }

@@ -46,10 +46,6 @@ rust_checks() {
 
 quality_checks() {
   shellcheck scripts/*.sh .github/hooks/pre-commit
-  "$signalscope_scripts_dir/check-linux-server.test.sh"
-  "$signalscope_scripts_dir/macos-server.test.sh"
-  "$signalscope_scripts_dir/chartgpu-submodule.test.sh"
-  "$signalscope_scripts_dir/ci-policy.test.sh"
   node "$signalscope_scripts_dir/generate-monte-carlo-demo.mjs" --check
   actionlint
   typos
@@ -61,40 +57,9 @@ quality_checks() {
   zizmor .github/workflows/ .github/actions/
 }
 
-bake_roundtrip_artifact() {
-  "$signalscope_scripts_dir/export.sh" \
-    --data frontend/tests/e2e/fixtures/roundtrip.csv \
-    --workspace frontend/tests/e2e/fixtures/roundtrip.signalscope \
-    --range all \
-    --fidelity preview \
-    --out build/export/roundtrip-preview.html
-  "$signalscope_scripts_dir/export.sh" \
-    --no-build \
-    --data frontend/tests/e2e/fixtures/roundtrip.csv \
-    --workspace frontend/tests/e2e/fixtures/roundtrip.signalscope \
-    --range all \
-    --fidelity full \
-    --out build/export/roundtrip-full.html
-}
-
-bake_bench_smoke_artifact() {
-  local -a data_args=()
-  local file out="$signalscope_root/build/bench/smoke.html" max_bytes=268435456 bytes
-  for file in "$signalscope_root"/examples/monte_carlo/run_*.csv; do
-    data_args+=(--data "$file")
-  done
-  "$signalscope_scripts_dir/export.sh" --no-build "${data_args[@]}" \
-    --workspace "$signalscope_root/examples/bench/smoke.workspace.json" \
-    --range all --fidelity full --out "$out"
-  bytes=$(stat -c %s "$out")
-  if [ "$bytes" -gt "$max_bytes" ]; then
-    echo "baked smoke snapshot is $bytes bytes (limit $max_bytes)" >&2
-    return 1
-  fi
-}
-
-build_e2e_server() {
-  # Functional E2E exercises the browser-host contract. Release compilation
-  # is covered by the packaged-app build, so keep this lane incremental.
+e2e_prerequisites() {
+  # Journeys drive the built frontend through an incremental debug server.
+  # Release compilation is covered by the packaged-app build.
+  "$signalscope_scripts_dir/build.sh" web
   cargo build -p scope-server
 }

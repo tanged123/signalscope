@@ -126,10 +126,16 @@ plot owns complete labeled axes and serialized per-panel state. Pointer actions
 need keyboard paths. Keep rendering deterministic and snapshot dependencies
 offline.
 
-Behavior changes need behavior tests. Use Rust tests for ingest, time,
-pyramids, protocol/session, and expressions; TypeScript tests for application,
-renderer, and snapshot behavior; Playwright for desktop interaction, layout,
-and export boundaries. Keep generated outputs synchronized.
+Tests exist to catch broken user experience and wrong data, not to pin
+implementation. Rust tests cover ingest, time, pyramids, protocol/session, and
+expressions. TypeScript unit tests cover pure data and math (decoders,
+resolution, ranges, statistics, parsing). Playwright journeys in
+`frontend/tests/e2e/` drive the real server through user-visible controls and
+assert outcomes: plots draw, actions change what the user sees, sessions and
+exports reproduce the workbench. Do not add tests that assert markup, class
+names, label wording, pixel geometry, or mocked GPU/DOM calls; a UI change
+should not require a test change unless a journey's outcome changed. Keep
+generated outputs synchronized.
 
 ## Delivery
 

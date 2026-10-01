@@ -340,23 +340,24 @@ Documentation/bug fixes do not require an unrelated repository-wide split.
 
 ## Validation and handoff
 
-| Changed behavior                            | First evidence                                                                    |
-| ------------------------------------------- | --------------------------------------------------------------------------------- |
-| Ingest, storage, reduction, expressions     | `./scripts/test.sh core [filter]`                                                 |
-| HTTP, host state, native persistence        | `./scripts/test.sh server [filter]`                                               |
-| Application, adapters, publication          | `./scripts/test.sh unit [file]`                                                   |
-| Schema/codegen or snapshot contract         | `./scripts/test.sh frontend` plus affected Rust tests                             |
-| Desktop interaction, layout, offline export | Playwright via `./scripts/test.sh e2e`, after implementation                      |
-| Resource or reduction policy                | Relevant `./scripts/test.sh bench` mode, with corpus and measured bounds reported |
+| Changed behavior                        | First evidence                                                                    |
+| --------------------------------------- | --------------------------------------------------------------------------------- |
+| Ingest, storage, reduction, expressions | `./scripts/test.sh core [filter]`                                                 |
+| HTTP, host state, native persistence    | `./scripts/test.sh server [filter]`                                               |
+| Pure frontend data and math             | `./scripts/test.sh unit [file]`                                                   |
+| Schema/codegen or snapshot contract     | `./scripts/test.sh frontend` plus affected Rust tests                             |
+| Anything a user sees or exports         | Playwright journeys via `./scripts/test.sh e2e`, then use the app yourself        |
+| Resource or reduction policy            | Relevant `./scripts/test.sh bench` mode, with corpus and measured bounds reported |
 
 Browser tests enable Chromium’s headless GPU presentation and share the
 SwiftShader ANGLE Vulkan context with the compositor. A separate GL/software
 presentation path can lose WebGPU canvas devices even after initialization
-succeeds. CI runs the complete browser suite and uploads failed traces so one
-run reports all regressions. Browser checks assert user actions, keyboard
-access, and meaningful layout invariants. Avoid inventories of descendant
-controls, menu positions, or exact CSS values in unrelated behavior tests;
-keep appearance checks focused on representative controls and relative scaling.
+succeeds. Journeys start `scope-server --dialog-dir <dir>`, which answers every
+file dialog from that directory, so import and export run through the real
+buttons. They assert outcomes rather than markup: panels draw, the exported
+snapshot reproduces each live panel, files are written. There are deliberately
+no DOM-markup, mocked-GPU, or stored-screenshot tests; UI churn must not
+require test churn.
 
 Viewport updates change ChartHost's domains and layout immediately; the shared
 `GpuContext` frame loop draws the latest state once per animation frame.

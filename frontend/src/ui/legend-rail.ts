@@ -441,7 +441,7 @@ function currentLegendPosition(
   };
 }
 
-export function nearestLegendEdge(
+function nearestLegendEdge(
   host: LegendRailHost,
   legend: HTMLElement,
   threshold = Number.POSITIVE_INFINITY,

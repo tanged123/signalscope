@@ -2,5 +2,5 @@
   "$schema": "https://unpkg.com/knip/schema.json",
   "entry": ["scripts/*.mjs", "tests/e2e/*.ts", "tests/bench/*.ts"],
   "project": ["src/**/*.ts", "tests/**/*.ts", "scripts/*.mjs", "*.config.ts"],
-  "ignore": ["src/generated/**", "vendor/**"]
+  "ignore": ["src/generated/**"]
 }
