@@ -1,4 +1,8 @@
-//! Minimal internal snapshot baker. `./scripts/export.sh` is the public entry.
+//! Command-line snapshot baker behind `./scripts/export.sh`, used by the
+//! release demo and the bake benchmark. It plans, bakes and injects through
+//! the same `snapshot` functions as the workbench's Export button; pass
+//! `--preferences` to carry a preferences file's appearance the way the
+//! button carries the running app's.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -6,7 +10,7 @@ use std::process::ExitCode;
 
 use scope_core::{
     ingest::{self, CancelToken, DecodeContext, registry::ProviderRegistry},
-    naming,
+    naming, preferences,
     pyramid::Pyramid,
     session, snapshot,
     store::{SignalStore, SourceKey},
@@ -16,6 +20,7 @@ use scope_protocol::{ExportFidelity, ExportRange};
 struct Args {
     data: Vec<PathBuf>,
     workspace: Option<PathBuf>,
+    preferences: Option<PathBuf>,
     template: PathBuf,
     out: PathBuf,
     range: ExportRange,
@@ -33,6 +38,7 @@ where
 {
     let mut data = Vec::new();
     let mut workspace = None;
+    let mut preferences = None;
     let mut template = None;
     let mut out = None;
     let mut range = ExportRange::All;
@@ -43,6 +49,7 @@ where
         match flag.as_str() {
             "--data" => data.push(PathBuf::from(value)),
             "--workspace" => workspace = Some(PathBuf::from(value)),
+            "--preferences" => preferences = Some(PathBuf::from(value)),
             "--template" => template = Some(PathBuf::from(value)),
             "--out" => out = Some(PathBuf::from(value)),
             "--range" => {
@@ -70,6 +77,7 @@ where
     Ok(Args {
         data,
         workspace,
+        preferences,
         template: template.unwrap_or_else(|| PathBuf::from("frontend/dist/snapshot-template.html")),
         out: out.ok_or("--out is required")?,
         range,
@@ -127,7 +135,12 @@ fn run(args: &Args) -> Result<(), String> {
     })?;
     let export = snapshot::plan(&session, &store, &pyramids, args.range, args.fidelity)
         .map_err(|error| error.to_string())?;
-    let manifest = snapshot::bake(&export, &session).map_err(|error| error.to_string())?;
+    let mut manifest = snapshot::bake(&export, &session).map_err(|error| error.to_string())?;
+    if let Some(path) = &args.preferences {
+        let loaded = preferences::load_from_path(path)
+            .map_err(|error| format!("preferences {}: {error}", path.display()))?;
+        manifest.preferences_json = Some(preferences::snapshot_json(&loaded));
+    }
     let html = snapshot::inject(&template, manifest).map_err(|error| error.to_string())?;
     if let Some(parent) = args
         .out
@@ -146,7 +159,7 @@ fn main() -> ExitCode {
             eprintln!("scope-bake: {message}");
             eprintln!(
                 "usage: scope-bake --data <file>... [--workspace <file>] \
-                 [--template <path>] [--range visible|all] \
+                 [--preferences <file>] [--template <path>] [--range visible|all] \
                  [--fidelity preview|standard|high|full] --out <path>"
             );
             return ExitCode::from(2);
