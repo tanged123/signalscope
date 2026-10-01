@@ -229,8 +229,8 @@ are valid, or X/Y timebases agree.
 | Snapshot payload              | Manifest schema plus Rust bake and `BakedPlane` readers           | Captured bindings, range/fidelity, offline zoom limits, size and injection checks            |
 
 These are separate version domains. A protocol change does not go in the
-session migration table. A release version is separate again; an existing
-synchronized PR bump is not repeated for documentation follow-ups.
+session migration table. A release version is separate again: it changes
+only in a PR meant to ship a release, and merging that PR publishes it.
 
 ## Adding behavior
 

@@ -8,7 +8,8 @@ show_help() {
 Usage: ./scripts/release.sh [version|tag|verify|checksums|publish|assets]
 
   version                 Validate and print the synchronized app version.
-  tag                     Create and push the annotated v<version> tag.
+  tag                     Create and push the annotated v<version> tag; prints
+                          nothing when that version is already released.
   verify <tag> <dir>      Validate the complete current-version package matrix.
   checksums <tag> <dir>   Verify packages and write SHA256SUMS.txt.
   publish <tag> <dir>     Create a GitHub Release from staged assets.
@@ -30,13 +31,12 @@ tag() {
   version="$("$script_dir/version.sh" get)"
   tag="v$version"
 
-  if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
-    echo "release tag already exists locally: $tag" >&2
-    exit 1
-  fi
-  if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
-    echo "release tag already exists on origin: $tag" >&2
-    exit 1
+  # Releasing is opt-in: a merge that leaves the version unchanged has
+  # nothing to tag.
+  if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null ||
+    git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+    echo "$tag is already released; bump the version to release" >&2
+    return 0
   fi
 
   git tag --annotate "$tag" --message "SignalScope $tag"
