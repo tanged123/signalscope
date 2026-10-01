@@ -369,6 +369,8 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
             pinned_value: 1.0565,
             label: "",
             offset: [10, -10] as [number, number],
+            histogram_window: null,
+            histogram_bin_count: null,
           },
           {
             id: "tip-2",
@@ -378,6 +380,8 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
             pinned_value: 1.1528,
             label: "",
             offset: [10, -10] as [number, number],
+            histogram_window: null,
+            histogram_bin_count: null,
           },
           {
             id: "tip-3",
@@ -387,6 +391,8 @@ test("panel signal legend keeps rosters virtual and exposes unified styles", asy
             pinned_value: 1.1482,
             label: "",
             offset: [10, -10] as [number, number],
+            histogram_window: null,
+            histogram_bin_count: null,
           },
         ],
         annotation_display: "labels",

@@ -79,6 +79,25 @@ it("schedules autosave for explicit-X navigation and fit", () => {
   expect(shell.scheduleAutosave).toHaveBeenCalledOnce();
 });
 
+it("fits a histogram camera without changing its source-time window", () => {
+  const workspace = new WorkspaceModel();
+  const panel = workspace.addPanelRow({ kind: "histogram", bin_count: 32 });
+  workspace.setPanelXRange(panel.id, [10, 20]);
+  workspace.setPanelTimeWindow(panel.id, [2, 4]);
+  const shell = Object.assign(Object.create(AppShell.prototype), {
+    workspace,
+    workspaceView: { resetYAxis: vi.fn() },
+    commitHistory: vi.fn(),
+    scheduleAutosave: vi.fn(),
+    renderTiles: vi.fn(),
+  }) as {
+    fitPanelView(id: string): void;
+  };
+  shell.fitPanelView(panel.id);
+  expect(panel.x_range).toBeNull();
+  expect(panel.time_window).toEqual([2, 4]);
+});
+
 describe("GPU failure handling", () => {
   it("stops presentation work and releases hosts before the device", () => {
     const disposePresentation = vi.fn();
@@ -545,6 +564,7 @@ describe("open command shortcuts", () => {
       queryTiles: () => Promise.reject(new Error("not used")),
       queryLine2D: () => Promise.reject(new Error("not used")),
       querySamples: () => Promise.reject(new Error("not used")),
+      queryHistogram: () => Promise.reject(new Error("not used")),
     } satisfies DataPlane);
     const internals = shell as unknown as {
       commands: CommandRegistry;

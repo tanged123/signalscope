@@ -12,6 +12,8 @@ export type PanelSeriesAction =
   | "hide"
   | "show";
 
+export type PanelSeriesScope = "all" | "selected";
+
 function refKey(ref: SeriesRef): string {
   return JSON.stringify([ref.source_key, ref.channel]);
 }
@@ -75,6 +77,7 @@ export function applyPanelSeriesAction(
   panel: PanelState,
   refs: readonly SeriesRef[],
   action: PanelSeriesAction,
+  scope: PanelSeriesScope = "all",
 ): void {
   if (action === "select" || action === "clear") {
     panel.focus =
@@ -90,7 +93,7 @@ export function applyPanelSeriesAction(
   } else if (action === "hide" || action === "show") {
     setSeriesField(panel, refs, { visible: action === "show" });
   } else {
-    if (action === "undim") panel.ghost_mode = "all";
+    if (action === "undim" && scope === "all") panel.ghost_mode = "all";
     setSeriesField(panel, refs, {
       opacity: action === "dim" ? panel.ghost_opacity : 1,
     });

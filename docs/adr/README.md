@@ -76,6 +76,7 @@ progress; amend earlier records with explicit links when their guidance changes.
 57. [Compact panel configuration menus](0065-panel-toolbar-groups.md)
 
 58. [Scatter panels and panel creation](0066-scatter-panels-and-creation.md)
+59. [Exact histogram panels](0067-exact-histogram-panels.md)
 
 ## Superseded decisions
 

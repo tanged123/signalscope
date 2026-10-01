@@ -1,4 +1,6 @@
 import { usesPairedSamples } from "./panel-content";
+import type { HistogramResponse } from "../generated/protocol";
+import { histogramBytes, histogramIdentity } from "./histogram-data";
 import { queryLineGroups } from "./line-query";
 import type { LineBindings } from "./line-bindings";
 import type { ColumnarTileResponse } from "./bin-columns";
@@ -21,7 +23,14 @@ import { prepareSignalXLine } from "../render/signal-x-adapter";
 
 export type PanelLineResponse =
   | { kind: "time"; response: ColumnarTileResponse }
-  | { kind: "signal"; response: Line2DResponse };
+  | { kind: "signal"; response: Line2DResponse }
+  | {
+      kind: "histogram";
+      response: HistogramResponse;
+      identity?: string;
+      pending?: boolean;
+      captured?: boolean;
+    };
 
 export interface LinePresentationCallbacks {
   panels(): readonly PanelState[];
@@ -131,6 +140,7 @@ export class LinePresentationController {
   publishCachedCoverage(): void {
     let next: Map<string, PanelLineResponse> | null = null;
     for (const panel of this.callbacks.panels()) {
+      if (panel.content.kind === "histogram") continue;
       const window = this.callbacks.windowFor(panel);
       const current = this.responsesByPanel.get(panel.id);
       if (usesPairedSamples(panel)) {
@@ -208,6 +218,35 @@ export class LinePresentationController {
         span > 0 ? (paddedWindow.t1 - paddedWindow.t0) / span : 1;
       return { panel, signals, window, paddedWindow, pixelWidth, paddingRatio };
     });
+    let histogramCpu = 0;
+    let histogramGpu = 0;
+    for (const input of panelInputs) {
+      if (input.panel.content.kind !== "histogram") continue;
+      const bytes = histogramBytes(
+        input.signals.ids.length,
+        input.panel.content.bin_count,
+      );
+      histogramCpu += bytes.cpu;
+      histogramGpu += bytes.gpu;
+      const previous = this.responsesByPanel.get(input.panel.id);
+      const capture = this.plane.histogramCaptures?.find(
+        (entry) => entry.panel_id === input.panel.id,
+      );
+      const identity = histogramIdentity({
+        signal_ids:
+          capture?.response.series.map((series) => series.signal_id) ??
+          input.signals.ids,
+        window: capture?.response.window ?? input.window,
+        bin_count: input.panel.content.bin_count,
+      });
+      if (previous?.kind === "histogram" && previous.identity !== identity)
+        this.responsesByPanel.set(input.panel.id, {
+          ...previous,
+          pending: true,
+        });
+    }
+    if (panelInputs.some((input) => input.panel.content.kind === "histogram"))
+      this.render();
     const adapterLimits = (
       this.callbacks.gpu()?.adapter as
         | { limits?: { maxBufferSize?: unknown } }
@@ -222,44 +261,50 @@ export class LinePresentationController {
     const retainedLineUnits =
       this.signalXCache.retainedResourceUnitCount(replacing);
     const densityPlan = planPresentationDensity({
-      demands: panelInputs.map((input) => ({
-        panelId: input.panel.id,
-        physicalPixels: input.pixelWidth * devicePixelRatio,
-        paddingRatio: input.paddingRatio,
-        visibleSeries:
-          input.signals.ids.length +
-          (input.panel.color_axis != null ? 5 * input.signals.ids.length : 0) +
-          (usesPairedSamples(input.panel)
-            ? 2 * (input.signals.groups?.length ?? 1)
-            : 0),
-        reductionExpansion: usesPairedSamples(input.panel)
-          ? 4 +
-            2 *
-              Math.max(
-                0,
-                ...(input.signals.groups?.map(
-                  (group) =>
-                    new Set([
-                      ...group.ids,
-                      ...Object.values(group.colorIds ?? {}),
-                    ]).size,
-                ) ?? [input.signals.ids.length]),
-              )
-          : 1,
-        cpuBytesPerUnit: usesPairedSamples(input.panel)
-          ? CPU_BYTES_PER_LINE2D_VALUE
-          : CPU_BYTES_PER_BIN,
-        gpuBytesPerUnit: usesPairedSamples(input.panel)
-          ? GPU_BYTES_PER_LINE2D_VALUE
-          : GPU_BYTES_PER_BIN,
-      })),
+      demands: panelInputs
+        .filter((input) => input.panel.content.kind !== "histogram")
+        .map((input) => ({
+          panelId: input.panel.id,
+          physicalPixels: input.pixelWidth * devicePixelRatio,
+          paddingRatio: input.paddingRatio,
+          visibleSeries:
+            input.signals.ids.length +
+            (input.panel.color_axis != null
+              ? 5 * input.signals.ids.length
+              : 0) +
+            (usesPairedSamples(input.panel)
+              ? 2 * (input.signals.groups?.length ?? 1)
+              : 0),
+          reductionExpansion: usesPairedSamples(input.panel)
+            ? 4 +
+              2 *
+                Math.max(
+                  0,
+                  ...(input.signals.groups?.map(
+                    (group) =>
+                      new Set([
+                        ...group.ids,
+                        ...Object.values(group.colorIds ?? {}),
+                      ]).size,
+                  ) ?? [input.signals.ids.length]),
+                )
+            : 1,
+          cpuBytesPerUnit: usesPairedSamples(input.panel)
+            ? CPU_BYTES_PER_LINE2D_VALUE
+            : CPU_BYTES_PER_BIN,
+          gpuBytesPerUnit: usesPairedSamples(input.panel)
+            ? GPU_BYTES_PER_LINE2D_VALUE
+            : GPU_BYTES_PER_BIN,
+        })),
       budgets,
       retainedCpuBytes:
         retainedTileUnits * CPU_BYTES_PER_BIN +
-        retainedLineUnits * CPU_BYTES_PER_LINE2D_VALUE,
+        retainedLineUnits * CPU_BYTES_PER_LINE2D_VALUE +
+        histogramCpu,
       retainedGpuBytes:
         retainedTileUnits * GPU_BYTES_PER_BIN +
-        retainedLineUnits * GPU_BYTES_PER_LINE2D_VALUE,
+        retainedLineUnits * GPU_BYTES_PER_LINE2D_VALUE +
+        histogramGpu,
     });
     this.callbacks.onPlan(densityPlan);
     const nextResponses = new Map<string, PanelLineResponse>();
@@ -281,6 +326,53 @@ export class LinePresentationController {
         const { panel, signals, window, paddedWindow, pixelWidth } = input;
         const { ids, missing } = signals;
         nextMissing.set(panel.id, missing);
+        if (panel.content.kind === "histogram") {
+          const previous = this.responsesByPanel.get(panel.id);
+          try {
+            if (
+              histogramCpu * 2 > budgets.cpuBytes ||
+              histogramGpu * 2 > budgets.gpuBytes
+            ) {
+              throw new Error(
+                "Histogram results exceed the shared display memory budget. Reduce bins or visible signals.",
+              );
+            }
+            const capture = this.plane.histogramCaptures?.find(
+              (entry) => entry.panel_id === panel.id,
+            );
+            const request = {
+              request_id: crypto.randomUUID(),
+              signal_ids:
+                capture?.response.series.map((series) => series.signal_id) ??
+                ids,
+              window: capture?.response.window ?? window,
+              bin_count: panel.content.bin_count,
+            };
+            const identity = histogramIdentity(request);
+            if (
+              previous?.kind === "histogram" &&
+              previous.identity === identity
+            ) {
+              nextResponses.set(panel.id, { ...previous, pending: false });
+              return;
+            }
+            const response = await this.plane.queryHistogram(request, signal);
+            if (refreshToken !== this.refreshToken) return;
+            nextResponses.set(panel.id, {
+              kind: "histogram",
+              response,
+              identity,
+              captured: capture !== undefined,
+            });
+          } catch (error: unknown) {
+            if (refreshToken !== this.refreshToken) return;
+            nextErrors.set(panel.id, errorMessage(error));
+            this.callbacks.onError(error);
+            if (previous?.kind === "histogram")
+              nextResponses.set(panel.id, { ...previous, pending: false });
+          }
+          return;
+        }
         const signalX = usesPairedSamples(panel);
         if (ids.length === 0 || (signalX && signals.xId === null)) return;
         const desiredDevicePixels = Math.max(
@@ -367,7 +459,7 @@ export class LinePresentationController {
       for (const replacement of replacements.values()) {
         if (replacement.data.kind === "time") {
           prepareTimeTiles(replacement.data.response);
-        } else {
+        } else if (replacement.data.kind === "signal") {
           prepareSignalXLine(replacement.data.response, replacement.viewWindow);
         }
       }
@@ -387,7 +479,7 @@ export class LinePresentationController {
           ...entry,
           response: replacement.data.response,
         });
-      } else {
+      } else if (replacement.data.kind === "signal") {
         this.signalXCache.store(panelId, {
           ...entry,
           response: replacement.data.response,

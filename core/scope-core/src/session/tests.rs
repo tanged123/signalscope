@@ -1,6 +1,43 @@
 use super::*;
 
 #[test]
+fn histogram_sessions_validate_settings_and_migrate_line_content() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../protocol/testdata/session-parser-cases.json"
+    ))
+    .unwrap();
+    let mut value = serde_json::to_value(Session::default()).unwrap();
+    value["schema_version"] = 33.into();
+    value["tabs"][0]["panels"] = serde_json::json!([fixture["panel"].clone()]);
+    let migrated = from_json(&value.to_string()).unwrap();
+    assert_eq!(migrated.schema_version, SESSION_SCHEMA_VERSION);
+    assert!(matches!(
+        migrated.tabs[0].panels[0].content,
+        PanelContent::Line2d
+    ));
+    value["schema_version"] = SESSION_SCHEMA_VERSION.into();
+    value["tabs"][0]["panels"][0]["content"] =
+        serde_json::json!({"kind":"histogram","bin_count":32});
+    let histogram = from_json(&value.to_string()).unwrap();
+    assert_eq!(
+        from_json(&serde_json::to_string(&histogram).unwrap()).unwrap(),
+        histogram
+    );
+    for bins in [
+        serde_json::json!(0),
+        serde_json::json!(257),
+        serde_json::json!(2.5),
+        serde_json::json!("32"),
+    ] {
+        value["tabs"][0]["panels"][0]["content"]["bin_count"] = bins;
+        assert!(from_json(&value.to_string()).is_err());
+    }
+    value["tabs"][0]["panels"][0]["content"]["bin_count"] = 32.into();
+    value["tabs"][0]["panels"][0]["axis_equal"] = true.into();
+    assert!(from_json(&value.to_string()).is_err());
+}
+
+#[test]
 fn line_sessions_migrate_and_scatter_round_trips() {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../protocol/testdata/session-parser-cases.json"

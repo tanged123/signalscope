@@ -96,6 +96,7 @@ export default tseslint.config(
     ignores: [
       "src/app/**/*.test.ts",
       "src/app/line2d-family.ts",
+      "src/app/histogram-family.ts",
       "src/app/line-presentation-controller.ts",
     ],
     rules: {

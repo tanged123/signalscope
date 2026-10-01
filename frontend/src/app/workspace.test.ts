@@ -154,6 +154,8 @@ describe("panel X axis", () => {
       pinned_value: 2,
       label: "tip",
       offset: [10, -10],
+      histogram_window: null,
+      histogram_bin_count: null,
     });
 
     model.removeSignalRef(ref);
@@ -231,6 +233,8 @@ describe("derived definitions", () => {
       pinned_value: 1,
       label: "",
       offset: [10, -10],
+      histogram_window: null,
+      histogram_bin_count: null,
     });
     model.addNamedSet({
       id: "set-1",
@@ -252,6 +256,8 @@ describe("derived definitions", () => {
       pinned_value: 2,
       label: "",
       offset: [10, -10],
+      histogram_window: null,
+      histogram_bin_count: null,
     });
 
     model.removeSignalRef(refForPath(path), path);
@@ -845,6 +851,8 @@ describe("WorkspaceModel", () => {
       pinned_value: 2,
       label: "before",
       offset: [10, -10],
+      histogram_window: null,
+      histogram_bin_count: null,
     });
 
     model.setAnnotationLabel(panel.id, "ann-1", "after");
@@ -880,6 +888,8 @@ describe("WorkspaceModel", () => {
       pinned_value: 0,
       label: "",
       offset: [10, -10],
+      histogram_window: null,
+      histogram_bin_count: null,
     });
     expect(legacySeries(model.panel(panel.id))[0]).toMatchObject({
       color_slot: 5,

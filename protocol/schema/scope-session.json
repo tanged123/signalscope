@@ -1,5 +1,5 @@
 {
-  "schema_version": 33,
+  "schema_version": 34,
   "types": {
     "Theme": {
       "kind": "enum",
@@ -172,7 +172,9 @@
         "pinned_x": "f64?",
         "pinned_value": "f64",
         "label": "string",
-        "offset": "f64[2]"
+        "offset": "f64[2]",
+        "histogram_window": "f64[2]?",
+        "histogram_bin_count": "u32?"
       }
     },
     "PanelState": {
@@ -291,7 +293,10 @@
       "tag": "kind",
       "variants": {
         "line2d": {},
-        "scatter2d": {}
+        "scatter2d": {},
+        "histogram": {
+          "fields": { "bin_count": "u32" }
+        }
       }
     }
   }

@@ -44,7 +44,12 @@ export function composePanelPng(
   title: string,
   plot: HTMLCanvasElement,
   overlay: HTMLCanvasElement,
-  colors: { background: string; text: string; font: string },
+  colors: {
+    background: string;
+    text: string;
+    font: string;
+    caption?: string | null;
+  },
 ): HTMLCanvasElement {
   const dpr = globalThis.devicePixelRatio || 1;
   const header = Math.round(28 * dpr);
@@ -59,6 +64,15 @@ export function composePanelPng(
   context.font = `${String(Math.round(12 * dpr))}px ${colors.font}`;
   context.textBaseline = "middle";
   context.fillText(title, Math.round(10 * dpr), header / 2);
+  if (colors.caption !== undefined && colors.caption !== null) {
+    context.font = `${String(Math.round(10 * dpr))}px ${colors.font}`;
+    context.textAlign = "right";
+    context.fillText(
+      colors.caption,
+      output.width - Math.round(10 * dpr),
+      header / 2,
+    );
+  }
   context.drawImage(plot, 0, header);
   context.drawImage(overlay, 0, header);
   return output;

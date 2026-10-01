@@ -214,9 +214,12 @@ export class WorkspaceView {
     return this.views.get(id)?.plotXRange() ?? null;
   }
 
-  async capturePanel(
-    id: string,
-  ): Promise<{ plot: HTMLCanvasElement; overlay: HTMLCanvasElement } | null> {
+  async capturePanel(id: string): Promise<{
+    plot: HTMLCanvasElement;
+    overlay: HTMLCanvasElement;
+    windowNote?: string | null;
+    quality?: string | null;
+  } | null> {
     return (await this.views.get(id)?.capturePlot()) ?? null;
   }
 

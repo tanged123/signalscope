@@ -54,10 +54,13 @@ values remain `badge`, `keys`, `roster`, and `rail` for compatibility.
 
 Expanded legends use compact bordered buttons in the UI font for
 Select all / Clear selection, Dim all / Undim all, and
-Hide all / Show all in a visible row above the encoding controls. These act on
-every assigned signal, including rows outside the current filter. Hiding and
+Hide all / Show all in a visible row above the encoding controls. With a legend
+selection, dim/undim and hide/show act on selected signals and their labels say
+"selected"; otherwise they act on every assigned signal. Both scopes include
+rows outside the current filter. Clear selection appears for any selection. Hiding and
 dimming preserve focus; selecting preserves visibility and explicit opacity.
-Undim all also disables the dim-non-focused rule. Each action is one undo step.
+Undim all also disables the dim-non-focused rule; Undim selected preserves it.
+Each action is one undo step.
 The workspace publishes these changes once; `app/panel-series-actions.ts` owns
 the transitions using existing focus and override fields. `ui/legend-bulk-actions.ts`
 owns the buttons, and their keyboard focus survives refreshes. Session/snapshot

@@ -330,9 +330,39 @@ export interface BakedLine2D {
   levels: BakedLine2DLevel[];
 }
 
+export interface HistogramRequest {
+  request_id: string;
+  signal_ids: string[];
+  window: TimeWindow;
+  bin_count: number;
+}
+
+export interface HistogramSeries {
+  signal_id: string;
+  signal_path: string;
+  unit: string | null;
+  counts: string[];
+  finite_count: string;
+  excluded_count: string;
+}
+
+export interface HistogramResponse {
+  request_id: string;
+  window: TimeWindow;
+  edges: number[];
+  series: HistogramSeries[];
+}
+
+export interface BakedHistogram {
+  panel_id: string;
+  bin_count: number;
+  response: HistogramResponse;
+}
+
 export interface SnapshotManifest {
   session_json: string;
   preferences_json: string | null;
   signals: BakedSignal[];
   line2d: BakedLine2D[] | null;
+  histograms: BakedHistogram[] | null;
 }

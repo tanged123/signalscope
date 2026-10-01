@@ -56,6 +56,23 @@ test("explicit creation and directional shortcuts have already chosen a type", (
   }
 });
 
+test("histogram content defaults to 32 bins and persists valid bin changes", () => {
+  const workspace = new WorkspaceModel();
+  const panel = workspace.addPanelRow({ kind: "histogram", bin_count: 32 });
+  expect(panel.content).toEqual({ kind: "histogram", bin_count: 32 });
+  const before = workspace.revision();
+  workspace.setHistogramBinCount(panel.id, 100);
+  expect(panel.content).toEqual({ kind: "histogram", bin_count: 100 });
+  expect(workspace.revision()).toBe(before + 1);
+  expect(() => workspace.setHistogramBinCount(panel.id, 0)).toThrow(
+    "between 1 and 256",
+  );
+  expect(panel.content).toEqual({ kind: "histogram", bin_count: 100 });
+  expect(() => workspace.setHistogramBinCount(panel.id, 999)).toThrow(
+    "between 1 and 256",
+  );
+});
+
 test.each(["pick", "query", "set"])(
   "assigning a %s binding accepts the default type even if the binding is later removed",
   (kind) => {

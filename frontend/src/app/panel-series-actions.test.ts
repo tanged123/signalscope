@@ -36,6 +36,32 @@ function fixture() {
 }
 
 describe("bulk plot signal actions", () => {
+  it("changes selected signals without changing other signals or their ghost policy", () => {
+    const { workspace, panel, refs, resolve } = fixture();
+    workspace.applySeriesAction(panel.id, refs, "show");
+    const selected = refs.slice(0, 1);
+    workspace.applySeriesAction(panel.id, selected, "select");
+    workspace.setGhostMode(panel.id, "ghost");
+    const others = resolve().slice(1);
+    workspace.applySeriesAction(panel.id, selected, "dim", "selected");
+    workspace.applySeriesAction(panel.id, selected, "hide", "selected");
+    expect(resolve()[0]).toMatchObject({
+      visible: false,
+      opacity: panel.ghost_opacity,
+      focused: true,
+    });
+    expect(resolve().slice(1)).toEqual(others);
+    workspace.applySeriesAction(panel.id, selected, "show", "selected");
+    workspace.applySeriesAction(panel.id, selected, "undim", "selected");
+    expect(resolve()[0]).toMatchObject({
+      visible: true,
+      opacity: 1,
+      focused: true,
+    });
+    expect(resolve().slice(1)).toEqual(others);
+    expect(panel.ghost_mode).toBe("ghost");
+  });
+
   it("keeps focus, visibility, opacity and line properties independent across bulk actions", () => {
     const { workspace, panel, refs, resolve } = fixture();
     const styles = resolve().map(({ hue, dash, width }) => ({

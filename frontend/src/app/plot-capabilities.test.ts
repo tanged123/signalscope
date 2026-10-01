@@ -69,6 +69,8 @@ function annotation(
     pinned_value: pinnedValue,
     label: "",
     offset: [10, -10],
+    histogram_window: null,
+    histogram_bin_count: null,
   };
 }
 

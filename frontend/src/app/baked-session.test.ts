@@ -71,6 +71,8 @@ describe("parseBakedSession", () => {
         series_path: "run/y",
         anchor: 1,
         pinned_x: null,
+        histogram_window: null,
+        histogram_bin_count: null,
         pinned_value: 2,
         label: "tip",
         offset: [10, -10],
@@ -82,10 +84,18 @@ describe("parseBakedSession", () => {
     const annotation = parsed.tabs[0]?.panels[0]?.annotations[0];
     if (annotation === undefined) throw new Error("annotation is missing");
     delete annotation.pinned_x;
+    delete annotation.histogram_window;
+    delete annotation.histogram_bin_count;
 
     const restored = parseBakedSession(JSON.stringify(parsed));
 
     expect(restored.tabs[0]?.panels[0]?.annotations[0]?.pinned_x).toBeNull();
+    expect(
+      restored.tabs[0]?.panels[0]?.annotations[0]?.histogram_window,
+    ).toBeNull();
+    expect(
+      restored.tabs[0]?.panels[0]?.annotations[0]?.histogram_bin_count,
+    ).toBeNull();
   });
 
   it("round-trips current panel style and statistic fields", () => {

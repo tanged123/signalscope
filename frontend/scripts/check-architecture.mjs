@@ -51,6 +51,10 @@ for (const [file, source] of [
     'import { line2DFromTimeTiles } from "../render/time-adapter";',
   ],
   [
+    "src/app/histogram-family.ts",
+    'import type { Line2DRenderInput } from "../render/line2d";',
+  ],
+  [
     "src/app/line-presentation-controller.ts",
     'import { prepareTimeTiles } from "../render/time-adapter";',
   ],

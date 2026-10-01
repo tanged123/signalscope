@@ -84,10 +84,12 @@ function coarseTileResponse(signalId = "1"): ColumnarTileResponse {
 }
 
 type ControllerProbe = {
+  plane: DataPlane;
   controller: LinePresentationController;
   queryTiles: ReturnType<typeof vi.fn<DataPlane["queryTiles"]>>;
   queryLine2D: ReturnType<typeof vi.fn<DataPlane["queryLine2D"]>>;
   querySamples: ReturnType<typeof vi.fn<DataPlane["querySamples"]>>;
+  queryHistogram: ReturnType<typeof vi.fn<DataPlane["queryHistogram"]>>;
   panels: PanelState[];
   windows: Map<string, { t0: number; t1: number }>;
   panelSignalIds: ReturnType<
@@ -120,6 +122,21 @@ function controllerProbe(
   );
   const queryTilesMock = vi.fn<DataPlane["queryTiles"]>(queryTiles);
   const queryLine2D = vi.fn<DataPlane["queryLine2D"]>();
+  const queryHistogram = vi.fn<DataPlane["queryHistogram"]>((request) =>
+    Promise.resolve({
+      request_id: request.request_id,
+      window: request.window,
+      edges: [0, 1, 2],
+      series: request.signal_ids.map((id) => ({
+        signal_id: id,
+        signal_path: `run/${id}`,
+        unit: "V",
+        counts: ["1", "2"],
+        finite_count: "3",
+        excluded_count: "0",
+      })),
+    }),
+  );
   const panelSignalIds = vi.fn<LinePresentationCallbacks["signalIds"]>(
     (current) => ({
       ids: [current.id === "panel-2" ? "2" : "1"],
@@ -135,6 +152,7 @@ function controllerProbe(
     queryTiles: queryTilesMock,
     queryLine2D,
     querySamples,
+    queryHistogram,
   } as unknown as DataPlane;
   const controller = new LinePresentationController(plane, {
     panels: () => panels,
@@ -150,10 +168,12 @@ function controllerProbe(
     onError,
   });
   return {
+    plane,
     controller,
     queryTiles: queryTilesMock,
     queryLine2D,
     querySamples,
+    queryHistogram,
     panels,
     windows,
     panelSignalIds,
@@ -538,9 +558,10 @@ describe("LinePresentationController", () => {
     await Promise.all([refresh, queued]);
 
     expect(probe.render).toHaveBeenCalledOnce();
-    expect([...probe.controller.responses()][0]?.response.requestId).toBe(
-      "tiles-second",
-    );
+    expect(
+      [...probe.controller.responses()].find((data) => data.kind === "time")
+        ?.response.requestId,
+    ).toBe("tiles-second");
   });
 
   it("does not publish a response after its panel is invalidated", async () => {
@@ -677,16 +698,18 @@ describe("LinePresentationController", () => {
     await probe.controller.refresh();
     probe.windows.set("panel-1", { t0: 40, t1: 60 });
     await probe.controller.refresh();
-    expect([...probe.controller.responses()][0]?.response.requestId).toBe(
-      "tiles-detail",
-    );
+    expect(
+      [...probe.controller.responses()].find((data) => data.kind === "time")
+        ?.response.requestId,
+    ).toBe("tiles-detail");
 
     probe.windows.set("panel-1", { t0: 10, t1: 90 });
     probe.controller.publishCachedCoverage();
 
-    expect([...probe.controller.responses()][0]?.response.requestId).toBe(
-      "tiles-overview",
-    );
+    expect(
+      [...probe.controller.responses()].find((data) => data.kind === "time")
+        ?.response.requestId,
+    ).toBe("tiles-overview");
   });
 
   it("reports synchronous render errors without retrying", () => {
@@ -703,6 +726,104 @@ describe("LinePresentationController", () => {
     expect(probe.render).toHaveBeenCalledOnce();
     expect(probe.onError).toHaveBeenCalledWith(error);
     expect(probe.onRender).not.toHaveBeenCalled();
+  });
+
+  it("queries exact histogram windows and only rebins on input changes", async () => {
+    const probe = controllerProbe(() => Promise.resolve(tileResponse()));
+    const histogramPanel = probe.panels[0] as PanelState;
+    histogramPanel.content = { kind: "histogram", bin_count: 2 };
+    await probe.controller.refresh();
+    expect(probe.queryTiles).not.toHaveBeenCalled();
+    expect(probe.queryHistogram).toHaveBeenCalledWith(
+      expect.objectContaining({
+        window: { t0: 0, t1: 5 },
+        bin_count: 2,
+        signal_ids: ["1"],
+      }),
+      expect.any(AbortSignal),
+    );
+    histogramPanel.x_range = [0.5, 1.5];
+    probe.controller.render();
+    await probe.controller.refresh();
+    expect(probe.queryHistogram).toHaveBeenCalledTimes(1);
+    probe.windows.set("panel-1", { t0: 1, t1: 3 });
+    await probe.controller.refresh();
+    expect(probe.queryHistogram).toHaveBeenCalledTimes(2);
+    histogramPanel.content = { kind: "histogram", bin_count: 4 };
+    await probe.controller.refresh();
+    expect(probe.queryHistogram).toHaveBeenCalledTimes(3);
+    probe.panelSignalIds.mockReturnValue({
+      ids: ["2"],
+      xId: null,
+      missing: [],
+    });
+    await probe.controller.refresh();
+    expect(probe.queryHistogram).toHaveBeenCalledTimes(4);
+  });
+
+  it("rejects stale histogram completion and retains old provenance after failure", async () => {
+    const probe = controllerProbe(() => Promise.resolve(tileResponse()));
+    (probe.panels[0] as PanelState).content = {
+      kind: "histogram",
+      bin_count: 2,
+    };
+    await probe.controller.refresh();
+    const old = [...probe.controller.responses()][0];
+    const pending =
+      deferred<Awaited<ReturnType<DataPlane["queryHistogram"]>>>();
+    probe.queryHistogram.mockImplementationOnce(() => pending.promise);
+    probe.windows.set("panel-1", { t0: 1, t1: 4 });
+    const first = probe.controller.refresh();
+    expect([...probe.controller.responses()][0]).toMatchObject({
+      kind: "histogram",
+      pending: true,
+      response: { window: { t0: 0, t1: 5 } },
+    });
+    probe.windows.set("panel-1", { t0: 2, t1: 3 });
+    probe.queryHistogram.mockRejectedValueOnce(
+      new Error("source could not be read"),
+    );
+    const second = probe.controller.refresh();
+    if (old?.kind !== "histogram") throw new Error("expected histogram");
+    pending.resolve({ ...old.response, window: { t0: 1, t1: 4 } });
+    await Promise.all([first, second]);
+    expect([...probe.controller.responses()][0]).toMatchObject({
+      pending: false,
+      response: { window: { t0: 0, t1: 5 } },
+    });
+    const errorFor = probe.render.mock.calls.at(-1)?.[3];
+    expect(errorFor?.("panel-1")).toBe("source could not be read");
+    probe.controller.invalidate("panel-1");
+    expect([...probe.controller.responses()]).toEqual([]);
+  });
+
+  it("retains the captured histogram interval when linked time changes offline", async () => {
+    const probe = controllerProbe(() => Promise.resolve(tileResponse()));
+    (probe.panels[0] as PanelState).content = {
+      kind: "histogram",
+      bin_count: 2,
+    };
+    Object.defineProperty(probe.plane, "histogramCaptures", {
+      value: [
+        {
+          panel_id: "panel-1",
+          bin_count: 2,
+          response: { window: { t0: 1, t1: 3 }, series: [{ signal_id: "1" }] },
+        },
+      ],
+    });
+    await probe.controller.refresh();
+    expect(probe.queryHistogram).toHaveBeenCalledWith(
+      expect.objectContaining({ window: { t0: 1, t1: 3 } }),
+      expect.any(AbortSignal),
+    );
+    probe.windows.set("panel-1", { t0: 1.5, t1: 2.5 });
+    await probe.controller.refresh();
+    expect(probe.queryHistogram).toHaveBeenCalledTimes(1);
+    expect([...probe.controller.responses()][0]).toMatchObject({
+      captured: true,
+      response: { window: { t0: 1, t1: 3 } },
+    });
   });
 
   it("schedules render and refresh work after a resize", () => {

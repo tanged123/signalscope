@@ -1,4 +1,5 @@
 import type { PanelContent, PanelState } from "../generated/session";
+import { validatePanelContent } from "./histogram-settings";
 
 export function setEmptyPanelContent(
   panel: PanelState,
@@ -6,7 +7,7 @@ export function setEmptyPanelContent(
 ): boolean {
   if (panel.bindings.length > 0 || panel.content_selection_pending !== true)
     return false;
-  panel.content = { ...content };
+  panel.content = validatePanelContent(content);
   panel.content_selection_pending = false;
   return true;
 }
@@ -21,3 +22,5 @@ export function usesPairedSamples(
     panel.color_axis != null
   );
 }
+
+export { validateHistogramBinCount } from "./histogram-settings";

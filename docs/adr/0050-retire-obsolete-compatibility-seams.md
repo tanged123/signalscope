@@ -2,6 +2,9 @@
 
 Status: Accepted
 
+Histogram-specific value anchors and optional pin provenance are added by
+[ADR 0067](0067-exact-histogram-panels.md); it does not restore mode/domain fields.
+
 ## Decision
 
 SignalScope supports the current time-series presentation model directly.

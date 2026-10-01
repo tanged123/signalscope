@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, test } from "vitest";
 
-import type { SampleSeries } from "../generated/protocol";
-import { buildCsv, csvMaxPoints } from "./csv-export";
+import type { HistogramResponse, SampleSeries } from "../generated/protocol";
+import { buildCsv, buildHistogramCsv, csvMaxPoints } from "./csv-export";
 
 function series(
   path: string,
@@ -60,4 +60,28 @@ describe("buildCsv", () => {
       csvMaxPoints("full"),
     ]).toEqual([512, 2_048, 16_384, 4_294_967_295]);
   });
+});
+
+test("buildHistogramCsv preserves bin edges, units, and exact counts", () => {
+  const response: HistogramResponse = {
+    request_id: "hist-1",
+    window: { t0: 0, t1: 5 },
+    edges: [-1, 0, 2],
+    series: [
+      {
+        signal_id: "1",
+        signal_path: "run/value",
+        unit: "V",
+        counts: ["9007199254740993", "2"],
+        finite_count: "9007199254740995",
+        excluded_count: "0",
+      },
+    ],
+  };
+  const csv = buildHistogramCsv(response);
+  expect(csv.text).toBe(
+    '"bin_start [V]","bin_end [V]",source_window_t0,source_window_t1,"run/value count"\n-1,0,0,5,9007199254740993\n0,2,0,5,2\n',
+  );
+  expect(csv.rows).toBe(2);
+  expect(csv.stride).toBe(1);
 });

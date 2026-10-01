@@ -24,6 +24,117 @@ pub(super) fn panel_signal_ids(
     ids
 }
 
+/// Resolves the series that a Histogram panel actually presents. Histogram
+/// capture follows the same binding and visibility rules as the live legend:
+/// focus and ghost mode affect styling only, while a matching `visible`
+/// override removes a series from the captured result.
+pub(super) fn panel_histogram_signal_ids(
+    session: &Session,
+    store: &SignalStore,
+    panel: &PanelState,
+) -> Result<Vec<SignalId>, SnapshotError> {
+    let mut resolved = Vec::new();
+    let mut seen = BTreeSet::new();
+    for (reference, signal) in panel_y_refs(session, store, panel)? {
+        if !seen.insert(signal.id) || !histogram_visible(panel, store, &reference, signal) {
+            continue;
+        }
+        resolved.push(signal.id);
+    }
+    Ok(resolved)
+}
+
+fn panel_y_refs<'a>(
+    session: &'a Session,
+    store: &'a SignalStore,
+    panel: &'a PanelState,
+) -> Result<Vec<(SeriesRef, &'a Signal)>, SnapshotError> {
+    let mut resolved = Vec::new();
+    for binding in &panel.bindings {
+        match binding.kind {
+            BindingKind::Pick => append_resolved_refs(&mut resolved, session, store, &binding.refs),
+            BindingKind::Query => {
+                if let Some(selector) = &binding.selector {
+                    if let Some(signals) = matching_signals(store, selector) {
+                        for signal in signals {
+                            resolved.push((canonical_ref(store, signal)?, signal));
+                        }
+                    }
+                }
+            }
+            BindingKind::Set => {
+                let Some(set) = session
+                    .named_sets
+                    .iter()
+                    .find(|set| Some(set.id.as_str()) == binding.set_id.as_deref())
+                else {
+                    continue;
+                };
+                match set.kind {
+                    NamedSetKind::Pick => {
+                        append_resolved_refs(&mut resolved, session, store, &set.refs);
+                    }
+                    NamedSetKind::Query => {
+                        if let Some(selector) = &set.selector {
+                            if let Some(signals) = matching_signals(store, selector) {
+                                for signal in signals {
+                                    resolved.push((canonical_ref(store, signal)?, signal));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(resolved)
+}
+
+fn append_resolved_refs<'a>(
+    output: &mut Vec<(SeriesRef, &'a Signal)>,
+    session: &Session,
+    store: &'a SignalStore,
+    refs: &[SeriesRef],
+) {
+    output.extend(refs.iter().filter_map(|reference| {
+        signal_from_ref(session, store, reference).map(|signal| (reference.clone(), signal))
+    }));
+}
+
+fn canonical_ref(store: &SignalStore, signal: &Signal) -> Result<SeriesRef, SnapshotError> {
+    let source = store
+        .sources()
+        .find(|source| source.id == signal.source_id)
+        .ok_or(SnapshotError::MissingSource(signal.id))?;
+    Ok(SeriesRef {
+        source_key: source.key.0.to_string(),
+        channel: signal.local_path.clone(),
+    })
+}
+
+fn histogram_visible(
+    panel: &PanelState,
+    store: &SignalStore,
+    reference: &SeriesRef,
+    signal: &Signal,
+) -> bool {
+    let mut visible = true;
+    for override_entry in &panel.overrides {
+        let ref_match = override_entry.target_ref.as_ref().is_some_and(|target| {
+            target.source_key == reference.source_key && target.channel == reference.channel
+        });
+        let selector_match = override_entry
+            .target_selector
+            .as_deref()
+            .and_then(|selector| matching_signals(store, selector))
+            .is_some_and(|mut signals| signals.any(|candidate| candidate.id == signal.id));
+        if (ref_match || selector_match) && override_entry.visible.is_some() {
+            visible = override_entry.visible.unwrap_or(true);
+        }
+    }
+    visible
+}
+
 fn panel_y_signal_ids(session: &Session, store: &SignalStore, panel: &PanelState) -> Vec<SignalId> {
     let mut ids = Vec::new();
     for binding in &panel.bindings {
@@ -106,6 +217,12 @@ pub(super) fn line_combinations(
     let mut combinations = BTreeSet::new();
     for tab in &session.tabs {
         for panel in &tab.panels {
+            if matches!(
+                panel.content,
+                crate::session::PanelContent::Histogram { .. }
+            ) {
+                continue;
+            }
             if matches!(panel.x_axis, SampleAxisSource::Time)
                 && panel.color_axis.is_none()
                 && matches!(panel.content, crate::session::PanelContent::Line2d)

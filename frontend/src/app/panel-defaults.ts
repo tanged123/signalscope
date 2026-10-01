@@ -1,13 +1,15 @@
 import type { PanelContent, PanelState } from "../generated/session";
 import { DEFAULT_PANEL_LINE_WIDTH } from "./style-defaults";
+import { validatePanelContent } from "./histogram-settings";
 
 export function createPanelState(
   number: number,
   content?: PanelContent,
 ): PanelState {
+  const selectedContent = validatePanelContent(content ?? { kind: "line2d" });
   return {
     id: `panel-${String(number)}`,
-    content: { ...(content ?? { kind: "line2d" }) },
+    content: { ...selectedContent },
     content_selection_pending: content === undefined,
     title: `Panel ${String(number)}`,
     axis_style: "inline",
