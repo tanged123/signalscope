@@ -3008,7 +3008,8 @@ function axisEditZone(
 ): "x" | "y" | null {
   const { plot } = layout;
   if (axisStyle === "inline") {
-    if (px <= plot.x + 90 && py <= plot.y + 18) return "y";
+    // The inline Y name sits right of the top tick label, so its zone spans both.
+    if (px <= plot.x + 160 && py <= plot.y + 18) return "y";
     if (px >= plot.x + plot.width - 90 && py >= plot.y + plot.height - 18) {
       return "x";
     }
