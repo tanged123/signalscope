@@ -4,15 +4,11 @@
 signalscope_scripts_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 signalscope_root="$(cd "$signalscope_scripts_dir/.." && pwd)"
 
-# Re-exec the calling script inside the Nix dev shell when invoked outside it,
-# then apply the defaults every wrapper relies on.
+# Re-exec the calling script inside the Nix dev shell when invoked outside it.
+# The shell hook owns build defaults such as CARGO_BUILD_JOBS and the linker.
 ensure_dev_shell() {
   if [ -z "${IN_NIX_SHELL:-}" ]; then
     exec "$signalscope_scripts_dir/dev.sh" "$0" "$@"
-  fi
-  # Keep local machines responsive; let CI runners use every core.
-  if [ -z "${CI:-}" ]; then
-    export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
   fi
   cd "$signalscope_root" || exit 1
 }

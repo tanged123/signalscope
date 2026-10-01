@@ -94,16 +94,35 @@
               zig
               zizmor
             ]
-            ++ lib.optionals pkgs.stdenv.isLinux [ electron_43 ]
+            ++ lib.optionals pkgs.stdenv.isLinux [
+              electron_43
+              mold
+            ]
             ++ linuxPackages;
 
           shellHook = ''
-            if [ -z "''${CI:-}" ]; then
-              export CARGO_BUILD_JOBS="''${CARGO_BUILD_JOBS:-2}"
+            # Size local Cargo parallelism by memory, not cores: optimized
+            # dependency builds peak near 3 GiB per rustc job, and exceeding
+            # the WSL VM's memory kills the whole VM. CI runners use every core.
+            if [ -z "''${CI:-}" ] && [ -z "''${CARGO_BUILD_JOBS:-}" ]; then
+              signalscope_mem_gib=$(( $(getconf _PHYS_PAGES 2>/dev/null || echo 0) * $(getconf PAGESIZE 2>/dev/null || echo 0) / 1073741824 ))
+              signalscope_cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+              CARGO_BUILD_JOBS=$(( signalscope_mem_gib / 3 ))
+              if [ "$CARGO_BUILD_JOBS" -gt "$signalscope_cores" ]; then
+                CARGO_BUILD_JOBS=$signalscope_cores
+              fi
+              if [ "$CARGO_BUILD_JOBS" -lt 2 ]; then
+                CARGO_BUILD_JOBS=2
+              fi
+              export CARGO_BUILD_JOBS
+              unset signalscope_mem_gib signalscope_cores
             fi
             export RUST_BACKTRACE=1
             export HDF5_DIR="${hdf5Root}"
             ${lib.optionalString pkgs.stdenv.isLinux ''
+              # GNU ld dominates incremental relinks of scope-server; mold is
+              # several times faster. Release packaging links with zig instead.
+              export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=mold"
               export SIGNALSCOPE_ELECTRON_BIN="${pkgs.electron_43}/bin/electron"
               export PLAYWRIGHT_BROWSERS_PATH=0
               export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="${pkgs.chromium}/bin/chromium"

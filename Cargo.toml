@@ -35,6 +35,11 @@ tempfile = "3"
 thiserror = "2"
 uuid = { version = "1", features = ["v4", "v5", "serde"] }
 
+# Line tables keep backtraces readable while cutting the debug binary's size
+# and link time; switch locally to `debug = true` when using a debugger.
+[profile.dev]
+debug = "line-tables-only"
+
 # The dev-profile workbench runs the full ingest and
 # pyramid pipeline; unoptimized scope-core is ~5x slower on multi-GB opens.
 [profile.dev.package."*"]
