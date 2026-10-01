@@ -38,7 +38,7 @@ export class ExportDialog {
   private readonly confirm: HTMLButtonElement;
   private selected: ExportFormat = "html";
   private range: ExportRange = "visible";
-  private fidelity: ExportFidelity = "standard";
+  private fidelity: ExportFidelity = "high";
   private pngScope: PngScope = "focused";
   private htmlEstimate: ExportEstimate | null | undefined;
   private pngSize: number | null = null;
@@ -126,7 +126,7 @@ export class ExportDialog {
     )) {
       input.addEventListener("change", () => {
         this.selected = input.value as ExportFormat;
-        this.fidelity = this.selected === "csv" ? "high" : "standard";
+        this.fidelity = "high";
         if (this.selected === "csv" && this.csvFidelity !== this.fidelity) {
           void this.loadCsv(this.fidelity);
         }
@@ -174,7 +174,7 @@ export class ExportDialog {
     }
     this.selected = format;
     this.range = "visible";
-    this.fidelity = format === "csv" ? "high" : "standard";
+    this.fidelity = "high";
     this.pngScope = "focused";
     this.htmlEstimate = undefined;
     this.pngSize = null;

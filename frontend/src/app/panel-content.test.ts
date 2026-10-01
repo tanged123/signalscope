@@ -43,17 +43,22 @@ test("choosing the default line type completes selection and survives undo/redo 
   expect(workspace.panel(panel.id)?.content_selection_pending).toBe(false);
 });
 
-test("explicit creation and directional shortcuts have already chosen a type", () => {
+test("typed creation has chosen a type; untyped splits still ask", () => {
   const workspace = new WorkspaceModel();
   const panel = workspace.addPanelRow({ kind: "line2d" });
   const right = workspace.splitPanelRight(panel.id, { kind: "scatter2d" });
-  const down = workspace.splitPanelDown(panel.id);
+  const down = workspace.splitPanelDown(panel.id, { kind: "line2d" });
   for (const created of [panel, right, down]) {
     expect(created?.content_selection_pending).toBe(false);
     expect(
       workspace.setEmptyPanelContent(created?.id ?? "", { kind: "scatter2d" }),
     ).toBe(false);
   }
+  const untyped = workspace.splitPanelDown(panel.id);
+  expect(untyped?.content_selection_pending).toBe(true);
+  expect(
+    workspace.setEmptyPanelContent(untyped?.id ?? "", { kind: "scatter2d" }),
+  ).toBe(true);
 });
 
 test("histogram content defaults to 32 bins and persists valid bin changes", () => {

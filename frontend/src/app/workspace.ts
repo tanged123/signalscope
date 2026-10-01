@@ -370,10 +370,8 @@ export class WorkspaceModel {
     return true;
   }
 
-  splitPanelRight(
-    id: string,
-    content: PanelContent = { kind: "line2d" },
-  ): PanelState | null {
+  /** Without `content` the new panel asks for its type before plotting. */
+  splitPanelRight(id: string, content?: PanelContent): PanelState | null {
     const panel = splitPanel(this.activeTab(), id, "right", () =>
       this.createPanel(content),
     );
@@ -381,10 +379,7 @@ export class WorkspaceModel {
     return panel;
   }
 
-  splitPanelDown(
-    id: string,
-    content: PanelContent = { kind: "line2d" },
-  ): PanelState | null {
+  splitPanelDown(id: string, content?: PanelContent): PanelState | null {
     const panel = splitPanel(this.activeTab(), id, "below", () =>
       this.createPanel(content),
     );

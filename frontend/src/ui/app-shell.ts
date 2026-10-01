@@ -120,12 +120,12 @@ const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const AUTOSAVE_DEBOUNCE_MS = 800;
 const DERIVED_PREFIX = "derived/";
 
-export function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
+function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
   if (count <= 0) return "none";
   return count <= 4 ? "focus" : "ghost";
 }
 
-export function bundleCompletionEntries(
+function bundleCompletionEntries(
   signals: readonly SignalSummary[],
 ): { localPath: string; runCount: number }[] {
   const sourcesByChannel = new Map<string, Set<string>>();
@@ -143,7 +143,7 @@ export function bundleCompletionEntries(
     .sort((left, right) => left.localPath.localeCompare(right.localPath));
 }
 
-export function exportSourceOptions(
+function exportSourceOptions(
   signals: readonly SignalSummary[],
 ): { key: string; label: string }[] {
   const sources = new Map<string, string>();
@@ -818,15 +818,24 @@ export class AppShell {
         this.applyTimeWindow(id, next.min, next.max);
       }
     };
+    // A wheel or drag step waits 250 ms before it is recorded; undo/redo
+    // first record it so an immediate Ctrl+Z reverts that step, not the one
+    // before it.
+    const flushPendingHistory = (): void => {
+      if (this.historyCoalesceTimer !== null) this.closeHistoryCoalescing();
+    };
     const undoCommand: Command = shellCommand("undo", {
-      enabled: () => this.history.canUndo(),
+      enabled: () =>
+        this.history.canUndo() || this.historyCoalesceTimer !== null,
       run: () => {
+        flushPendingHistory();
         this.applyHistory(this.history.undo());
       },
     });
     const redoCommand: Command = shellCommand("redo", {
       enabled: () => this.history.canRedo(),
       run: () => {
+        flushPendingHistory();
         this.applyHistory(this.history.redo());
       },
     });
@@ -894,7 +903,7 @@ export class AppShell {
     this.registerFocusedPanelCommand(
       "split-panel-right",
       "Split current panel right",
-      (id) => void this.workspace.splitPanelRight(id),
+      (id) => void this.workspace.splitPanelRight(id, { kind: "line2d" }),
     );
     this.commands.register(
       shellCommand("cycle-cursor-mode", {
@@ -2299,8 +2308,20 @@ export class AppShell {
       });
       return buildHistogramCsv(response);
     }
-    const { ids } = this.panelSignalIds(panel);
-    if (ids.length === 0) return null;
+    // X and color signals share each Y's timebase, so writing them as columns
+    // keeps the exact pairs an XY or scatter panel plots.
+    const bindings = this.panelSignalIds(panel);
+    const ids = [
+      ...new Set([
+        ...(bindings.groups?.map((group) => group.xId) ??
+          (bindings.xId === null ? [] : [bindings.xId])),
+        ...bindings.ids,
+        ...(bindings.groups?.flatMap((group) =>
+          Object.values(group.colorIds ?? {}),
+        ) ?? []),
+      ]),
+    ];
+    if (bindings.ids.length === 0) return null;
     const window = this.effectiveWindow(panel);
     const response = await this.plane.querySamples({
       request_id: crypto.randomUUID(),
@@ -3098,14 +3119,14 @@ export class AppShell {
 /** Hides and empties the ingest banner. Workspace reset and load both need
  * this: the banner is deliberately kept visible while failures are recent,
  * and nothing else ever takes it down. */
-export function clearIngestProgress(root: HTMLElement): void {
+function clearIngestProgress(root: HTMLElement): void {
   const progress = root.querySelector<HTMLElement>(".ingest-progress");
   if (progress === null) return;
   progress.hidden = true;
   progress.replaceChildren();
 }
 
-export function renderBatchProgress(
+function renderBatchProgress(
   progress: HTMLElement,
   status: BatchStatus,
   cancel: () => void,
@@ -3188,14 +3209,14 @@ function tooltipHeader(text: string): HTMLElement {
   return header;
 }
 
-export interface GroupedCursorRow {
+interface GroupedCursorRow {
   label: string;
   value: string;
   colorIndex: number | null;
   ghost: boolean;
 }
 
-export function groupCursorRows(
+function groupCursorRows(
   rows: readonly PlotCursor["rows"][number][],
   ghostChannels: ReadonlyMap<string, string>,
 ): GroupedCursorRow[] {
