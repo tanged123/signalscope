@@ -36,21 +36,9 @@ importers:
       "@webgpu/types":
         specifier: 0.1.69
         version: 0.1.69
-      ast-v8-to-istanbul:
-        specifier: 0.3.12
-        version: 0.3.12
       eslint:
         specifier: 9.39.1
         version: 9.39.1(jiti@2.7.0)
-      istanbul-lib-coverage:
-        specifier: 3.2.2
-        version: 3.2.2
-      istanbul-lib-report:
-        specifier: 3.0.1
-        version: 3.0.1
-      istanbul-reports:
-        specifier: 3.2.0
-        version: 3.2.0
       jsdom:
         specifier: 26.1.0
         version: 26.1.0
