@@ -6,6 +6,8 @@ import type { Locator, Page } from "@playwright/test";
  * Headless SwiftShader presents WebGPU canvases without exposing them to page
  * screenshots, so read back what each canvas actually presented: every
  * submit copies freshly acquired swap-chain textures into mapped buffers.
+ * The copy must ride the frame's own submit, since a swap-chain texture
+ * expires once presented, and only the newest successful copy is kept.
  */
 export async function installPlotReadback(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -15,7 +17,8 @@ export async function installPlotReadback(page: Page): Promise<void> {
       HTMLCanvasElement,
       { texture: GPUTexture; device: GPUDevice }
     >();
-    const busy = new WeakSet<HTMLCanvasElement>();
+    const latest = new Map<HTMLCanvasElement, number>();
+    let sequence = 0;
     const configure = GPUCanvasContext.prototype.configure;
     GPUCanvasContext.prototype.configure = function (config) {
       devices.set(this, config.device);
@@ -38,9 +41,11 @@ export async function installPlotReadback(page: Page): Promise<void> {
     GPUQueue.prototype.submit = function (commands) {
       submit.call(this, commands);
       for (const [canvas, { texture, device }] of acquired) {
-        if (busy.has(canvas) || device.queue !== this) continue;
+        if (device.queue !== this) continue;
         acquired.delete(canvas);
-        busy.add(canvas);
+        sequence += 1;
+        const frameNumber = sequence;
+        latest.set(canvas, frameNumber);
         const { width, height } = texture;
         const bytesPerRow = Math.ceil((width * 4) / 256) * 256;
         const buffer = device.createBuffer({
@@ -57,11 +62,11 @@ export async function installPlotReadback(page: Page): Promise<void> {
           { width, height },
         );
         submit.call(this, [encoder.finish()]);
-        void device.popErrorScope();
+        const copied = device.popErrorScope();
         const bgra = texture.format.startsWith("bgra");
-        void buffer
-          .mapAsync(GPUMapMode.READ)
-          .then(() => {
+        void Promise.all([copied, buffer.mapAsync(GPUMapMode.READ)])
+          .then(([error]) => {
+            if (error !== null || latest.get(canvas) !== frameNumber) return;
             const source = new Uint8Array(buffer.getMappedRange());
             const frame = document.createElement("canvas");
             frame.width = width;
@@ -81,12 +86,10 @@ export async function installPlotReadback(page: Page): Promise<void> {
             }
             context.putImageData(image, 0, 0);
             frames.set(canvas, frame.toDataURL("image/png"));
-            buffer.unmap();
           })
           .catch(() => undefined)
           .finally(() => {
             buffer.destroy();
-            busy.delete(canvas);
           });
       }
     };
