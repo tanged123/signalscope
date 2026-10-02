@@ -32,14 +32,16 @@ tag() {
   tag="v$version"
 
   # Releasing is opt-in: a merge that leaves the version unchanged has
-  # nothing to tag.
-  if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null ||
-    git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+  # nothing to tag. Origin decides, so a tag left local by a failed push is
+  # pushed on the next attempt rather than skipped.
+  if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
     echo "$tag is already released; bump the version to release" >&2
     return 0
   fi
 
-  git tag --annotate "$tag" --message "SignalScope $tag"
+  if ! git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
+    git tag --annotate "$tag" --message "SignalScope $tag"
+  fi
   git push origin "$tag" >/dev/null
   printf '%s\n' "$tag"
 }
