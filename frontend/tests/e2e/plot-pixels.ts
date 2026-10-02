@@ -7,7 +7,7 @@ import type { Locator, Page } from "@playwright/test";
  * screenshots, so read back what each canvas actually presented: every
  * submit copies freshly acquired swap-chain textures into mapped buffers.
  * The copy must ride the frame's own submit, since a swap-chain texture
- * expires once presented, and only the newest successful copy is kept.
+ * expires once presented, and the newest successful copy is kept.
  */
 export async function installPlotReadback(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -17,7 +17,9 @@ export async function installPlotReadback(page: Page): Promise<void> {
       HTMLCanvasElement,
       { texture: GPUTexture; device: GPUDevice }
     >();
-    const latest = new Map<HTMLCanvasElement, number>();
+    // Frame number of each canvas's stored frame; copies can finish out of
+    // order, and a failed copy must not discard an earlier good one.
+    const stored = new Map<HTMLCanvasElement, number>();
     let sequence = 0;
     const configure = GPUCanvasContext.prototype.configure;
     GPUCanvasContext.prototype.configure = function (config) {
@@ -45,7 +47,6 @@ export async function installPlotReadback(page: Page): Promise<void> {
         acquired.delete(canvas);
         sequence += 1;
         const frameNumber = sequence;
-        latest.set(canvas, frameNumber);
         const { width, height } = texture;
         const bytesPerRow = Math.ceil((width * 4) / 256) * 256;
         const buffer = device.createBuffer({
@@ -66,7 +67,8 @@ export async function installPlotReadback(page: Page): Promise<void> {
         const bgra = texture.format.startsWith("bgra");
         void Promise.all([copied, buffer.mapAsync(GPUMapMode.READ)])
           .then(([error]) => {
-            if (error !== null || latest.get(canvas) !== frameNumber) return;
+            if (error !== null || (stored.get(canvas) ?? 0) > frameNumber)
+              return;
             const source = new Uint8Array(buffer.getMappedRange());
             const frame = document.createElement("canvas");
             frame.width = width;
@@ -85,6 +87,8 @@ export async function installPlotReadback(page: Page): Promise<void> {
               }
             }
             context.putImageData(image, 0, 0);
+            if ((stored.get(canvas) ?? 0) > frameNumber) return;
+            stored.set(canvas, frameNumber);
             frames.set(canvas, frame.toDataURL("image/png"));
           })
           .catch(() => undefined)
