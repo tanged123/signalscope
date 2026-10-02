@@ -53,6 +53,10 @@ export const test = base.extend<Fixtures>({
       const context = await browser.newContext({
         ...desktop,
         viewport: testInfo.project.use.viewport ?? desktop.viewport,
+        // The bench project serves its fixture page from Vite.
+        ...(testInfo.project.use.baseURL === undefined
+          ? {}
+          : { baseURL: testInfo.project.use.baseURL }),
       });
       await use(await context.newPage());
     } finally {
@@ -97,7 +101,14 @@ export const test = base.extend<Fixtures>({
         .toBe(true);
       await use({ url, dataDir, dialogs });
     } finally {
-      child.kill("SIGTERM");
+      // The server shuts down gracefully and may still write session files.
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = new Promise<void>((resolve) =>
+          child.once("exit", resolve),
+        );
+        child.kill("SIGTERM");
+        await exited;
+      }
       rmSync(dataDir, { recursive: true, force: true });
     }
   },
