@@ -3,11 +3,19 @@ import {
   validateHistogramBinCount,
   setEmptyPanelContent,
 } from "./panel-content";
-import { splitPanel } from "./panel-layout";
+import {
+  appendRow,
+  insertCell,
+  locatePanel,
+  removeCell,
+  resizeColumns,
+  resizeRows,
+  splitPanel,
+  type CellLocation,
+} from "./panel-layout";
 import type { PanelContent } from "../generated/session";
 import type {
   Annotation,
-  Binding,
   DashStyle,
   DerivedBundleState,
   DerivedSignal,
@@ -31,15 +39,16 @@ import type {
 } from "../generated/session";
 import { SESSION_SCHEMA_VERSION } from "../generated/session";
 
-import { setXAxis, setColorAxis, removeAxisRef } from "./line-bindings";
+import { setXAxis, setColorAxis } from "./line-bindings";
+import * as bindings from "./panel-bindings";
+import * as overrides from "./series-overrides";
+import { sameRef } from "./series-overrides";
 import {
   applyPanelSeriesAction,
   toggleSeriesVisibility,
   type PanelSeriesAction,
   type PanelSeriesScope,
 } from "./panel-series-actions";
-
-const MIN_FRACTION = 0.1;
 
 export interface WorkspaceViewState {
   activeTabId: string;
@@ -345,18 +354,14 @@ export class WorkspaceModel {
     return this.activeTab().panels.find((panel) => panel.id === id);
   }
 
-  locate(id: string): { rowIndex: number; cellIndex: number } | null {
-    for (const [rowIndex, row] of this.activeTab().layout.entries()) {
-      const cellIndex = row.panels.findIndex((cell) => cell.panel_id === id);
-      if (cellIndex !== -1) return { rowIndex, cellIndex };
-    }
-    return null;
+  locate(id: string): CellLocation | null {
+    return locatePanel(this.activeTab().layout, id);
   }
 
   addPanelRow(content?: PanelContent): PanelState {
     this.activeTab().maximized_panel_id = null;
     const panel = this.createPanel(content);
-    this.appendRow(panel.id);
+    appendRow(this.activeTab().layout, panel.id);
     this.activeTab().focused_panel_id = panel.id;
     this.touch(true);
     return panel;
@@ -370,10 +375,8 @@ export class WorkspaceModel {
     return true;
   }
 
-  splitPanelRight(
-    id: string,
-    content: PanelContent = { kind: "line2d" },
-  ): PanelState | null {
+  /** Without `content` the new panel asks for its type before plotting. */
+  splitPanelRight(id: string, content?: PanelContent): PanelState | null {
     const panel = splitPanel(this.activeTab(), id, "right", () =>
       this.createPanel(content),
     );
@@ -381,10 +384,7 @@ export class WorkspaceModel {
     return panel;
   }
 
-  splitPanelDown(
-    id: string,
-    content: PanelContent = { kind: "line2d" },
-  ): PanelState | null {
+  splitPanelDown(id: string, content?: PanelContent): PanelState | null {
     const panel = splitPanel(this.activeTab(), id, "below", () =>
       this.createPanel(content),
     );
@@ -395,8 +395,8 @@ export class WorkspaceModel {
   closePanel(id: string): void {
     const location = this.locate(id);
     if (location === null) return;
-    this.detachCell(location);
     const tab = this.activeTab();
+    removeCell(tab.layout, location);
     tab.panels = tab.panels.filter((panel) => panel.id !== id);
     if (tab.maximized_panel_id === id) tab.maximized_panel_id = null;
     if (tab.focused_panel_id === id) {
@@ -454,13 +454,7 @@ export class WorkspaceModel {
 
   addSeriesRef(panelId: string, ref: SeriesRef): boolean {
     const panel = this.panel(panelId);
-    if (panel === undefined) return false;
-    const binding =
-      panel.bindings.find((entry) => entry.kind === "pick") ??
-      this.createPickBinding(panel);
-    if (binding.refs.some((entry) => sameRef(entry, ref))) return false;
-    binding.refs.push({ ...ref });
-    panel.content_selection_pending = false;
+    if (panel === undefined || !bindings.addPickRef(panel, ref)) return false;
     this.touch(true);
     return true;
   }
@@ -482,28 +476,7 @@ export class WorkspaceModel {
       .flatMap((tab) => tab.panels)
       .find((entry) => entry.id === panelId);
     if (panel === undefined) return;
-    panel.bindings = panel.bindings
-      .map((binding) =>
-        binding.kind === "pick"
-          ? {
-              ...binding,
-              refs: binding.refs.filter((entry) => !sameRef(entry, ref)),
-            }
-          : binding,
-      )
-      .filter((binding) => binding.kind !== "pick" || binding.refs.length > 0);
-    panel.overrides = panel.overrides.filter(
-      (entry) => entry.target_ref === null || !sameRef(entry.target_ref, ref),
-    );
-    panel.focus = panel.focus.filter(
-      (entry) => entry.ref === null || !sameRef(entry.ref, ref),
-    );
-    if (deletingSignal) removeAxisRef(panel, ref);
-    if (path !== undefined) {
-      panel.annotations = panel.annotations.filter(
-        (annotation) => annotation.series_path !== path,
-      );
-    }
+    bindings.forgetSeries(panel, ref, path, deletingSignal);
     this.touch(true);
   }
 
@@ -541,11 +514,7 @@ export class WorkspaceModel {
   ): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
-    const override = this.ensureSeriesOverride(panel, ref);
-    if (patch.color_slot !== undefined) override.color_slot = patch.color_slot;
-    if (patch.dash !== undefined) override.dash = patch.dash;
-    if (patch.width !== undefined) override.width = patch.width;
-    this.pruneEmptySeriesOverride(panel, override);
+    overrides.patchSeriesOverride(panel, ref, patch);
     this.touch(true);
   }
 
@@ -559,23 +528,14 @@ export class WorkspaceModel {
 
   revertSeriesOverride(panelId: string, ref: SeriesRef): void {
     const panel = this.panel(panelId);
-    if (panel === undefined) return;
-    const override = panel.overrides.find(
-      (entry) => entry.target_ref !== null && sameRef(entry.target_ref, ref),
-    );
-    if (override === undefined) return;
-    override.color_slot = null;
-    override.dash = null;
-    override.width = null;
-    this.pruneEmptySeriesOverride(panel, override);
-    this.touch(true);
+    if (panel !== undefined && overrides.revertSeriesOverride(panel, ref))
+      this.touch(true);
   }
 
   setSeriesVisible(panelId: string, ref: SeriesRef, visible: boolean): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
-    const override = this.ensureSeriesOverride(panel, ref);
-    override.visible = visible;
+    overrides.setSeriesVisible(panel, ref, visible);
     this.touch(true);
   }
 
@@ -585,24 +545,11 @@ export class WorkspaceModel {
     dimension: StyleDimension | null,
   ): void {
     const panel = this.panel(panelId);
-    if (panel === undefined) return;
-    const keys = {
-      color: "color_by",
-      dash: "dash_by",
-      width: "width_by",
-    } as const;
-    const key = keys[property];
-    const previous = panel[key];
-    if (previous === dimension) return;
-    if (dimension !== null) {
-      const other = (Object.keys(keys) as (keyof typeof keys)[]).find(
-        (candidate) =>
-          candidate !== property && panel[keys[candidate]] === dimension,
-      );
-      if (other !== undefined) panel[keys[other]] = previous;
-    }
-    panel[key] = dimension;
-    this.touch(true);
+    if (
+      panel !== undefined &&
+      overrides.setEncoding(panel, property, dimension)
+    )
+      this.touch(true);
   }
 
   setColorBy(panelId: string, dimension: StyleDimension | null): void {
@@ -709,15 +656,7 @@ export class WorkspaceModel {
   ): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
-    panel.overrides.push({
-      target_ref: null,
-      target_selector: selector,
-      color_slot: style.color_slot ?? null,
-      dash: style.dash ?? null,
-      width: style.width ?? null,
-      opacity: style.opacity ?? null,
-      visible: style.visible ?? null,
-    });
+    overrides.addSelectorOverride(panel, selector, style);
     this.touch(true);
   }
 
@@ -741,26 +680,14 @@ export class WorkspaceModel {
   clearStyleOverrides(panelId: string): void {
     const panel = this.panel(panelId);
     if (panel === undefined) return;
-    for (const override of panel.overrides) {
-      override.color_slot = null;
-      override.dash = null;
-      override.width = null;
-    }
-    panel.overrides = panel.overrides.filter(
-      (override) => override.opacity !== null || override.visible !== null,
-    );
+    overrides.clearStyleOverrides(panel);
     this.touch(true);
   }
 
   clearStyleOverride(panelId: string, index: number): void {
     const panel = this.panel(panelId);
-    const override = panel?.overrides[index];
-    if (panel === undefined || override === undefined) return;
-    override.color_slot = null;
-    override.dash = null;
-    override.width = null;
-    this.pruneEmptySeriesOverride(panel, override);
-    this.touch(true);
+    if (panel !== undefined && overrides.clearStyleOverride(panel, index))
+      this.touch(true);
   }
 
   toggleFocus(panelId: string, entry: FocusEntry): void {
@@ -817,53 +744,24 @@ export class WorkspaceModel {
 
   addQueryBinding(panelId: string, selector: string): boolean {
     const panel = this.panel(panelId);
-    if (
-      panel === undefined ||
-      panel.bindings.some(
-        (binding) => binding.kind === "query" && binding.selector === selector,
-      )
-    ) {
+    if (panel === undefined || !bindings.addQueryBinding(panel, selector))
       return false;
-    }
-    panel.bindings.push({
-      kind: "query",
-      selector,
-      refs: [],
-      set_id: null,
-    });
-    panel.content_selection_pending = false;
     this.touch(true);
     return true;
   }
 
   addSetBinding(panelId: string, setId: string): boolean {
     const panel = this.panel(panelId);
-    if (
-      panel === undefined ||
-      panel.bindings.some(
-        (binding) => binding.kind === "set" && binding.set_id === setId,
-      )
-    ) {
+    if (panel === undefined || !bindings.addSetBinding(panel, setId))
       return false;
-    }
-    panel.bindings.push({
-      kind: "set",
-      selector: null,
-      refs: [],
-      set_id: setId,
-    });
-    panel.content_selection_pending = false;
     this.touch(true);
     return true;
   }
 
   removeBinding(panelId: string, index: number): void {
     const panel = this.panel(panelId);
-    if (panel === undefined || index < 0 || index >= panel.bindings.length) {
-      return;
-    }
-    panel.bindings.splice(index, 1);
-    this.touch(true);
+    if (panel !== undefined && bindings.removeBindingAt(panel, index))
+      this.touch(true);
   }
 
   nextSetId(): string {
@@ -887,62 +785,6 @@ export class WorkspaceModel {
       }
     }
     this.touch(true);
-  }
-
-  private createPickBinding(panel: PanelState): Binding {
-    const binding: Binding = {
-      kind: "pick",
-      selector: null,
-      refs: [],
-      set_id: null,
-    };
-    panel.bindings.push(binding);
-    return binding;
-  }
-
-  private overrideFor(
-    panel: PanelState | undefined,
-    ref: SeriesRef,
-  ): SeriesOverride | undefined {
-    return panel?.overrides.find(
-      (entry) => entry.target_ref !== null && sameRef(entry.target_ref, ref),
-    );
-  }
-
-  private ensureSeriesOverride(
-    panel: PanelState,
-    ref: SeriesRef,
-  ): SeriesOverride {
-    const existing = this.overrideFor(panel, ref);
-    if (existing !== undefined) return existing;
-    const created: SeriesOverride = {
-      target_ref: { ...ref },
-      target_selector: null,
-      color_slot: null,
-      dash: null,
-      width: null,
-      opacity: null,
-      visible: null,
-    };
-    panel.overrides.push(created);
-    return created;
-  }
-
-  private pruneEmptySeriesOverride(
-    panel: PanelState,
-    override: SeriesOverride,
-  ): void {
-    if (
-      override.color_slot !== null ||
-      override.dash !== null ||
-      override.width !== null ||
-      override.opacity !== null ||
-      override.visible !== null
-    ) {
-      return;
-    }
-    const index = panel.overrides.indexOf(override);
-    if (index !== -1) panel.overrides.splice(index, 1);
   }
 
   setPanelYRange(panelId: string, range: [number, number]): void {
@@ -1088,84 +930,25 @@ export class WorkspaceModel {
   }
 
   resizeRows(seamIndex: number, delta: number): void {
-    const above = this.activeTab().layout[seamIndex];
-    const below = this.activeTab().layout[seamIndex + 1];
-    if (above === undefined || below === undefined) return;
-    const shift = clampShift(above.height, below.height, delta);
-    above.height += shift;
-    below.height -= shift;
-    this.touch();
+    if (resizeRows(this.activeTab().layout, seamIndex, delta)) this.touch();
   }
 
   resizeColumns(rowIndex: number, seamIndex: number, delta: number): void {
-    const row = this.activeTab().layout[rowIndex];
-    const left = row?.panels[seamIndex];
-    const right = row?.panels[seamIndex + 1];
-    if (left === undefined || right === undefined) return;
-    const shift = clampShift(left.width, right.width, delta);
-    left.width += shift;
-    right.width -= shift;
-    this.touch();
+    if (resizeColumns(this.activeTab().layout, rowIndex, seamIndex, delta))
+      this.touch();
   }
 
   movePanel(id: string, targetRowIndex: number, targetCellIndex: number): void {
     const location = this.locate(id);
     if (location === null) return;
-    this.activeTab().maximized_panel_id = null;
-    const removedRow = this.detachCell(location);
+    const tab = this.activeTab();
+    tab.maximized_panel_id = null;
+    const removedRow = removeCell(tab.layout, location);
     let rowIndex = targetRowIndex;
     if (removedRow && location.rowIndex < rowIndex) rowIndex -= 1;
-    const row = this.activeTab().layout[rowIndex];
-    if (row === undefined) {
-      this.appendRow(id);
-    } else {
-      const share = 1 / (row.panels.length + 1);
-      for (const cell of row.panels) cell.width *= 1 - share;
-      row.panels.splice(Math.min(targetCellIndex, row.panels.length), 0, {
-        panel_id: id,
-        width: share,
-      });
-    }
-    this.activeTab().focused_panel_id = id;
+    insertCell(tab.layout, id, rowIndex, targetCellIndex);
+    tab.focused_panel_id = id;
     this.touch();
-  }
-
-  /** Removes a cell; returns true when its row was removed too. */
-  private detachCell(location: {
-    rowIndex: number;
-    cellIndex: number;
-  }): boolean {
-    const layout = this.activeTab().layout;
-    const row = layout[location.rowIndex];
-    if (row === undefined) return false;
-    row.panels.splice(location.cellIndex, 1);
-    if (row.panels.length === 0) {
-      layout.splice(location.rowIndex, 1);
-      normalize(
-        layout,
-        (item) => item.height,
-        (item, value) => (item.height = value),
-      );
-      return true;
-    }
-    normalize(
-      row.panels,
-      (item) => item.width,
-      (item, value) => (item.width = value),
-    );
-    return false;
-  }
-
-  private appendRow(panelId: string): void {
-    const layout = this.activeTab().layout;
-    const previous = layout.length;
-    for (const row of layout) {
-      row.height *= previous / (previous + 1);
-    }
-    layout.push({
-      height: previous === 0 ? 1 : 1 / (previous + 1),
-      panels: [{ panel_id: panelId, width: 1 }],
-    });
   }
 
   private createPanel(content?: PanelContent): PanelState {
@@ -1194,18 +977,6 @@ function nextUnusedNumber(
   return number;
 }
 
-function sameRef(
-  left: SeriesRef | null | undefined,
-  right: SeriesRef | null | undefined,
-): boolean {
-  return (
-    left != null &&
-    right != null &&
-    left.source_key === right.source_key &&
-    left.channel === right.channel
-  );
-}
-
 function sameFocus(left: FocusEntry, right: FocusEntry): boolean {
   if (left.kind !== right.kind) return false;
   if (left.kind === "series") return sameRef(left.ref, right.ref);
@@ -1223,18 +994,4 @@ function createWorkspaceTab(number: number): WorkspaceTab {
     panels: [],
     layout: [],
   };
-}
-
-function clampShift(first: number, second: number, delta: number): number {
-  return Math.min(Math.max(delta, MIN_FRACTION - first), second - MIN_FRACTION);
-}
-
-function normalize<T>(
-  items: T[],
-  get: (item: T) => number,
-  set: (item: T, value: number) => void,
-): void {
-  const total = items.reduce((sum, item) => sum + get(item), 0);
-  if (total <= 0) return;
-  for (const item of items) set(item, get(item) / total);
 }

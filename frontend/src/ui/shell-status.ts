@@ -21,7 +21,7 @@ export function renderDockFooter(
   container.replaceChildren(add);
 }
 
-export function formatPresentationStatus(
+function formatPresentationStatus(
   plan: Pick<DensityPlan, "density" | "targetDensity" | "limited" | "fits">,
 ): string {
   if (!plan.fits) return "Memory constrained";

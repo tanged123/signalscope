@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,7 +37,6 @@ Commands:
   get                         Print the canonical application version.
   github-output               Write the canonical version to GITHUB_OUTPUT.
   check                       Verify every release manifest is synchronized.
-  check-pr <base-ref>        Require one semantic-version increment from base-ref.
   set <major.minor.patch>     Set all application release manifests.
   bump <major|minor|patch>    Increment the canonical version everywhere.
 
@@ -59,18 +57,6 @@ function parseVersion(value, source = "version") {
 
 function formatVersion(parts) {
   return parts.join(".");
-}
-
-function isSingleIncrement(current, base) {
-  return (
-    (current[0] === base[0] &&
-      current[1] === base[1] &&
-      current[2] === base[2] + 1) ||
-    (current[0] === base[0] &&
-      current[1] === base[1] + 1 &&
-      current[2] === 0) ||
-    (current[0] === base[0] + 1 && current[1] === 0 && current[2] === 0)
-  );
 }
 
 function cargoWorkspaceVersion(text) {
@@ -228,19 +214,6 @@ async function setVersion(version, packageNames) {
   console.log(`SignalScope version set to ${version}`);
 }
 
-function baseVersion(baseRef) {
-  try {
-    const text = execFileSync("git", ["show", `${baseRef}:Cargo.toml`], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return cargoWorkspaceVersion(text);
-  } catch (error) {
-    if (error?.status === 128) return null;
-    throw error;
-  }
-}
-
 const [command, argument] = process.argv.slice(2);
 try {
   if (!command || command === "help" || command === "--help") {
@@ -259,29 +232,6 @@ try {
     console.log(
       `Release manifests are synchronized at ${assertConsistent(await readReleaseState(packageNames))}.`,
     );
-  } else if (command === "check-pr") {
-    if (!argument) throw new Error("check-pr requires a base git ref or SHA");
-    const packageNames = await workspacePackageNames();
-    const current = parseVersion(
-      assertConsistent(await readReleaseState(packageNames)),
-      "current version",
-    );
-    const base = baseVersion(argument);
-    if (base === null) {
-      console.log(
-        `Base ref ${argument} has no Cargo workspace; current version is ${formatVersion(current)}.`,
-      );
-    } else {
-      const parsedBase = parseVersion(base, "base version");
-      if (!isSingleIncrement(current, parsedBase)) {
-        throw new Error(
-          `PR version ${formatVersion(current)} must be one major, minor, or patch increment from base version ${base}`,
-        );
-      }
-      console.log(
-        `PR version ${formatVersion(current)} is one increment from base version ${base}.`,
-      );
-    }
   } else if (command === "set") {
     if (!argument) throw new Error("set requires major.minor.patch");
     await setVersion(argument, await workspacePackageNames());

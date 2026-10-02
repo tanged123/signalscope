@@ -72,7 +72,9 @@ configure_macos_signing() {
 build_server_release() {
   if [ "$(uname -s)" = Linux ]; then
     local rust_target=x86_64-unknown-linux-gnu
-    env -u HDF5_DIR cargo zigbuild --release -p scope-server \
+    # zig links the glibc-pinned binary; the dev shell's mold flag does not apply.
+    env -u HDF5_DIR -u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS \
+      cargo zigbuild --release -p scope-server \
       --target "$rust_target.2.35" "$@"
     SIGNALSCOPE_SERVER_BIN="target/$rust_target/release/scope-server"
     export SIGNALSCOPE_SERVER_BIN

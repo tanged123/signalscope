@@ -1,15 +1,15 @@
 # Architecture decision records
 
 ADRs are the durable architecture record. A later ADR amends or supersedes an
-earlier decision; the historical file stays in place so old sessions and
-implementation choices remain explainable.
+earlier decision. A fully superseded record is deleted; git history keeps it.
 
 ADRs record _why_. For _where code goes_ and _what to reuse_, read
 [architecture.md](../architecture.md).
 
-Use the [short ADR template](template.md) for changes to boundaries,
-compatibility, reduction semantics, or resource policy. Local implementation
-details do not need a separate record. [ADR 0054](0054-evidence-backed-architecture-guidance.md)
+Write an ADR, with the [short template](template.md), only for a decision that
+is expensive to reverse: a schema or protocol compatibility change, data or
+reduction semantics, or a process-wide resource policy. Everything else is
+recorded by the code, its comments and the commit message. [ADR 0054](0054-evidence-backed-architecture-guidance.md)
 defines how to distinguish current implementation, accepted decisions, and
 pending work. The [roadmap](../implementation-roadmap.md) owns implementation
 progress; amend earlier records with explicit links when their guidance changes.
@@ -77,20 +77,3 @@ progress; amend earlier records with explicit links when their guidance changes.
 
 58. [Scatter panels and panel creation](0066-scatter-panels-and-creation.md)
 59. [Exact histogram panels](0067-exact-histogram-panels.md)
-
-## Superseded decisions
-
-These records are retained for history and are not implementation guidance:
-
-- [Panel command routing and bounded legends](0012-panel-command-routing-and-bounded-legends.md)
-  and [responsive panel legends](0013-responsive-panel-legends.md) — superseded
-  by ADR 0048.
-- [Sequential colormap](0016-sequential-colormap.md), [spectrum semantics](0017-spectrum-semantics.md),
-  [histogram semantics](0018-histogram-semantics.md), [prepared plot capabilities](0019-prepared-plot-capabilities.md),
-  and [per-mode sample budgets](0037-per-mode-sample-budgets.md) — superseded by ADR 0043.
-- [Ensemble run-mean envelope](0028-ensemble-run-mean-envelope.md) — the
-  ensemble band implementation was removed; source-local signals and named
-  sets are governed by ADR 0030.
-
-Read the current records above first. Do not use superseded ADRs, design
-explorations, or historical plans as requirements for new work.

@@ -29,15 +29,8 @@ import {
   type Command,
 } from "../app/commands";
 import { parseBakedSession } from "../app/baked-session";
-import {
-  buildCsv,
-  buildHistogramCsv,
-  csvMaxPoints,
-  type CsvExport,
-} from "../app/csv-export";
 import type { DataPlane, IngestPort } from "../app/data-plane";
 import { columnsValueAtTime } from "../app/bin-columns";
-import { exportFileStem } from "../app/export-file";
 import { browserStorage, CommandUsage } from "../app/frecency";
 import {
   HistoryStack,
@@ -57,11 +50,9 @@ import {
   clampUiFontSize,
   defaultPreferences,
   parsePreferences,
-  snapshotPreferences,
   PLOT_FONT_SIZE,
   PLOT_LINE_WIDTH_SCALE,
 } from "../app/preferences";
-import { composePanelPng, panelPngTargets, toBase64 } from "../app/png-export";
 import { LinePresentationController } from "../app/line-presentation-controller";
 import { Catalog } from "../app/catalog";
 import {
@@ -79,14 +70,7 @@ import {
   zoomCenteredRange,
   panScaledRange,
 } from "../app/plot-math";
-import {
-  type BatchStatus,
-  type ExportFidelity,
-  type ExportRange,
-  type ExportSelection,
-  type SampleSeries,
-  type SignalSummary,
-} from "../generated/protocol";
+import { type BatchStatus, type SignalSummary } from "../generated/protocol";
 import type {
   CursorMode,
   PanelState,
@@ -102,11 +86,7 @@ import {
 import { basename, bindPointerDrag, required } from "./dom";
 import { FormulaBar } from "./formula-bar";
 import { ImportWizard } from "./import-wizard";
-import {
-  ExportDialog,
-  type ExportFormat,
-  type PngScope,
-} from "./export-dialog";
+import { ExportController } from "./export-controller";
 import type { PlotCursor } from "../app/plot-capabilities";
 import { SignalOutlineView } from "./signal-outline";
 import { SetsListView } from "./sets-list";
@@ -120,12 +100,12 @@ const CURSOR_MODES: readonly CursorMode[] = ["none", "track", "measure"];
 const AUTOSAVE_DEBOUNCE_MS = 800;
 const DERIVED_PREFIX = "derived/";
 
-export function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
+function arrivalModeFor(count: number): "none" | "focus" | "ghost" {
   if (count <= 0) return "none";
   return count <= 4 ? "focus" : "ghost";
 }
 
-export function bundleCompletionEntries(
+function bundleCompletionEntries(
   signals: readonly SignalSummary[],
 ): { localPath: string; runCount: number }[] {
   const sourcesByChannel = new Map<string, Set<string>>();
@@ -141,23 +121,6 @@ export function bundleCompletionEntries(
       runCount: sources.size,
     }))
     .sort((left, right) => left.localPath.localeCompare(right.localPath));
-}
-
-export function exportSourceOptions(
-  signals: readonly SignalSummary[],
-): { key: string; label: string }[] {
-  const sources = new Map<string, string>();
-  for (const signal of signals) {
-    if (sources.has(signal.source_key)) continue;
-    const suffix = `/${signal.local_path}`;
-    const label = signal.path.endsWith(suffix)
-      ? signal.path.slice(0, -suffix.length)
-      : signal.path;
-    sources.set(signal.source_key, label);
-  }
-  return [...sources]
-    .map(([key, label]) => ({ key, label }))
-    .sort((left, right) => left.label.localeCompare(right.label));
 }
 
 function validateDerivedBundleName(path: string): void {
@@ -192,10 +155,7 @@ export class AppShell {
   private pendingSetRefs: SeriesRef[] | null = null;
   private palette: CommandPalette | null = null;
   private formulaBar: FormulaBar | null = null;
-  private exportDialog: ExportDialog | null = null;
-  private exportPng: Uint8Array | null = null;
-  private readonly exportCsv = new Map<ExportFidelity, CsvExport>();
-  private exportGeneration = 0;
+  private readonly exports: ExportController;
   private signalTreeWidth: number = TREE_WIDTH.default;
   private helpTimer: number | null = null;
   private liveValuesScheduled = false;
@@ -210,13 +170,38 @@ export class AppShell {
   private historyGestureKey: string | null = null;
   private historyDirty: string | null = null;
   private historyCoalesceTimer: number | null = null;
+  private gpu: GpuContext | null = null;
 
   constructor(
     private readonly root: HTMLElement,
     private readonly plane: DataPlane,
-    private gpu: GpuContext | null = null,
     private readonly requestGpuRecovery: (() => void) | null = null,
   ) {
+    this.exports = new ExportController({
+      root: this.root,
+      plane: this.plane,
+      workspace: this.workspace,
+      signals: () => this.signals,
+      preferences: () => this.prefs,
+      capturePanel: async (panelId) =>
+        (await this.workspaceView?.capturePanel(panelId)) ?? null,
+      panelSignalIds: (panel) => this.panelSignalIds(panel),
+      effectiveWindow: (panel) => this.effectiveWindow(panel),
+      presentWorkspace: async () => {
+        this.workspaceTabs?.sync(
+          this.workspace.tabs(),
+          this.workspace.activeTabId(),
+        );
+        this.workspaceView?.sync(
+          this.signals.length > 0,
+          this.visibleSeriesCounts(),
+        );
+        this.workspaceView?.setCursorMode(this.workspace.cursorMode());
+        await this.refreshTiles();
+      },
+      reportError: (error) => this.reportError(error),
+      notify: (text) => this.showModeHelp(text),
+    });
     this.presentation = new LinePresentationController(this.plane, {
       panels: () => this.workspace.panels(),
       workspaceWidth: () =>
@@ -254,7 +239,9 @@ export class AppShell {
     });
     const warning = this.root.querySelector<HTMLElement>(".gpu-warning");
     if (warning !== null) warning.hidden = true;
-    this.workspaceView?.setGpu(gpu, this.signals.length > 0);
+    // Before mount there are no views; mount plans its requests with this GPU.
+    if (this.workspaceView === null) return;
+    this.workspaceView.setGpu(gpu, this.signals.length > 0);
     void this.refreshTiles();
   }
 
@@ -296,13 +283,14 @@ export class AppShell {
   }
 
   async mount(): Promise<void> {
-    await this.prepareMount();
+    const signalsListed = await this.prepareMount();
     this.mountWorkspaceViews();
     this.mountChromeControllers();
-    await this.loadMountedWorkspace();
+    await this.loadMountedWorkspace(signalsListed);
   }
 
-  private async prepareMount(): Promise<void> {
+  /** Restores the session before the views mount; true once its signals are listed. */
+  private async prepareMount(): Promise<boolean> {
     delete this.root.dataset.ready;
     this.root.innerHTML = shellMarkup();
     this.bindGpuWarning();
@@ -317,12 +305,21 @@ export class AppShell {
       });
     }
     await this.loadPreferences();
-    await this.restoreSession();
+    const baked = this.plane.bakedSessionJson;
+    let signalsListed = false;
+    if (baked !== undefined && baked !== "") {
+      this.workspace.replace(parseBakedSession(baked));
+    } else {
+      // Panels refresh once, after mount; refreshing here as well would query
+      // every panel twice.
+      signalsListed = await this.restoreSessionState(null);
+    }
     this.history.reset(historySnapshot(this.workspace.snapshot()));
     this.restoreTheme();
     if (this.plane.derived === null) {
       required<HTMLElement>(this.root, ".formula-toggle").hidden = true;
     }
+    return signalsListed;
   }
 
   private mountWorkspaceViews(): void {
@@ -772,8 +769,9 @@ export class AppShell {
     this.renderWindowReadout();
   }
 
-  private async loadMountedWorkspace(): Promise<void> {
-    await this.reloadSignals();
+  private async loadMountedWorkspace(signalsListed: boolean): Promise<void> {
+    if (signalsListed) this.publishCatalog();
+    else await this.reloadSignals();
     this.root.dataset.ready = "true";
     if (this.signals.length > 0 && this.workspace.panels().length === 0) {
       const panel = this.workspace.addPanelRow();
@@ -818,15 +816,24 @@ export class AppShell {
         this.applyTimeWindow(id, next.min, next.max);
       }
     };
+    // A wheel or drag step waits 250 ms before it is recorded; undo/redo
+    // first record it so an immediate Ctrl+Z reverts that step, not the one
+    // before it.
+    const flushPendingHistory = (): void => {
+      if (this.historyCoalesceTimer !== null) this.closeHistoryCoalescing();
+    };
     const undoCommand: Command = shellCommand("undo", {
-      enabled: () => this.history.canUndo(),
+      enabled: () =>
+        this.history.canUndo() || this.historyCoalesceTimer !== null,
       run: () => {
+        flushPendingHistory();
         this.applyHistory(this.history.undo());
       },
     });
     const redoCommand: Command = shellCommand("redo", {
       enabled: () => this.history.canRedo(),
       run: () => {
+        flushPendingHistory();
         this.applyHistory(this.history.redo());
       },
     });
@@ -894,7 +901,7 @@ export class AppShell {
     this.registerFocusedPanelCommand(
       "split-panel-right",
       "Split current panel right",
-      (id) => void this.workspace.splitPanelRight(id),
+      (id) => void this.workspace.splitPanelRight(id, { kind: "line2d" }),
     );
     this.commands.register(
       shellCommand("cycle-cursor-mode", {
@@ -1170,7 +1177,7 @@ export class AppShell {
       shellCommand("export-html", {
         enabled: () => this.plane.exporter !== null,
         run: () => {
-          this.openExportDialog("html");
+          this.exports.open("html");
         },
       }),
     );
@@ -1180,7 +1187,7 @@ export class AppShell {
           this.plane.exporter !== null &&
           this.workspace.focusedPanelId() !== null,
         run: () => {
-          this.openExportDialog("png");
+          this.exports.open("png");
         },
       }),
     );
@@ -1190,7 +1197,7 @@ export class AppShell {
           this.plane.exporter !== null &&
           this.workspace.focusedPanelId() !== null,
         run: () => {
-          this.openExportDialog("csv");
+          this.exports.open("csv");
         },
       }),
     );
@@ -1478,7 +1485,7 @@ export class AppShell {
     this.renderSearchStatus();
     window.addEventListener("keydown", (event) => {
       if (this.palette?.isOpen() === true) return;
-      if (this.exportDialog?.isOpen() === true) return;
+      if (this.exports.isOpen()) return;
       const target = event.target;
       const editing =
         target instanceof HTMLInputElement ||
@@ -2029,15 +2036,6 @@ export class AppShell {
   }
 
   /** Restores the baked snapshot session or the autosaved session. */
-  private async restoreSession(): Promise<void> {
-    const baked = this.plane.bakedSessionJson;
-    if (baked !== undefined && baked !== "") {
-      this.workspace.replace(parseBakedSession(baked));
-      return;
-    }
-    await this.loadSession(null);
-  }
-
   private async saveWorkspace(saveAs: boolean): Promise<void> {
     const port = this.plane.session;
     if (port === null) return;
@@ -2055,266 +2053,6 @@ export class AppShell {
     } catch (error: unknown) {
       this.reportError(error);
     }
-  }
-
-  private openExportDialog(format: ExportFormat): void {
-    this.exportGeneration += 1;
-    this.exportPng = null;
-    this.exportCsv.clear();
-    this.exportDialog ??= new ExportDialog(this.root, {
-      estimateHtml: async (setKeys) => {
-        const exporter = this.plane.exporter;
-        if (exporter === null) return null;
-        try {
-          return await exporter.estimate(
-            JSON.stringify(this.workspace.snapshot()),
-            this.exportSelection(setKeys),
-          );
-        } catch (error: unknown) {
-          this.reportError(error);
-          return null;
-        }
-      },
-      exportSets: () => exportSourceOptions(this.signals),
-      pngBytes: async () => {
-        const generation = this.exportGeneration;
-        try {
-          const png = await this.buildVisiblePng();
-          if (generation === this.exportGeneration) this.exportPng = png;
-          return png?.length ?? null;
-        } catch (error: unknown) {
-          this.reportError(error);
-          return null;
-        }
-      },
-      pngPanelCount: () => panelPngTargets(this.workspace.tabs()).length,
-      csvEstimate: async (fidelity) => {
-        const generation = this.exportGeneration;
-        try {
-          const csv = await this.buildVisibleCsv(fidelity);
-          if (csv === null) return null;
-          if (generation === this.exportGeneration) {
-            this.exportCsv.set(fidelity, csv);
-          }
-          return {
-            bytes: new TextEncoder().encode(csv.text).length,
-            rows: csv.rows,
-            stride: csv.stride,
-          };
-        } catch (error: unknown) {
-          this.reportError(error);
-          return null;
-        }
-      },
-      runExport: async (selected, range, fidelity, pngScope, setKeys) => {
-        const cachedPng = this.exportPng;
-        const cachedCsv = this.exportCsv.get(fidelity);
-        this.exportGeneration += 1;
-        try {
-          await this.runExport(
-            selected,
-            range,
-            fidelity,
-            pngScope,
-            cachedPng,
-            cachedCsv,
-            setKeys,
-          );
-        } catch (error: unknown) {
-          this.reportError(error);
-          throw error;
-        }
-      },
-    });
-    this.exportDialog.open(format);
-  }
-
-  private async runExport(
-    format: ExportFormat,
-    range: ExportRange,
-    fidelity: ExportFidelity,
-    pngScope: PngScope,
-    cachedPng: Uint8Array | null,
-    cachedCsv: CsvExport | undefined,
-    setKeys: readonly string[],
-  ): Promise<void> {
-    const exporter = this.plane.exporter;
-    if (exporter === null) return;
-    let path: string | null;
-    if (format === "html") {
-      path = await exporter.writeHtml(
-        JSON.stringify(this.workspace.snapshot()),
-        range,
-        fidelity,
-        this.exportSelection(setKeys),
-        snapshotPreferences(this.prefs),
-      );
-    } else if (format === "png") {
-      if (pngScope === "all") {
-        path = await this.exportAllPanelPngs();
-      } else {
-        const panelId = this.workspace.focusedPanelId();
-        const panel =
-          panelId === null ? undefined : this.workspace.panel(panelId);
-        if (panel === undefined) return;
-        const bytes = cachedPng ?? (await this.buildVisiblePng());
-        if (bytes === null) return;
-        const name = exportFileStem(panel.title, panel.id);
-        path = await exporter.saveFile(`${name}.png`, "png", toBase64(bytes));
-      }
-    } else {
-      const panelId = this.workspace.focusedPanelId();
-      const panel =
-        panelId === null ? undefined : this.workspace.panel(panelId);
-      if (panel === undefined) return;
-      const name = exportFileStem(panel.title, panel.id);
-      const csv = cachedCsv ?? (await this.buildVisibleCsv(fidelity));
-      if (csv === null) return;
-      path = await exporter.saveFile(
-        `${name}.csv`,
-        "csv",
-        toBase64(new TextEncoder().encode(csv.text)),
-      );
-    }
-    if (path !== null) this.showModeHelp(`exported ${path}`);
-  }
-
-  private exportSelection(sourceKeys?: readonly string[]): ExportSelection {
-    const session = this.workspace.snapshot();
-    return {
-      source_keys: [
-        ...(sourceKeys ?? session.sources.map((source) => source.key)),
-      ],
-    };
-  }
-
-  private async buildVisiblePng(): Promise<Uint8Array | null> {
-    const panelId = this.workspace.focusedPanelId();
-    if (panelId === null) return null;
-    return this.buildPanelPng(panelId);
-  }
-
-  private async buildPanelPng(panelId: string): Promise<Uint8Array | null> {
-    const panel = this.workspace.panel(panelId);
-    const canvases = (await this.workspaceView?.capturePanel(panelId)) ?? null;
-    if (panel === undefined || canvases === null) return null;
-    const styles = getComputedStyle(document.documentElement);
-    const composed = composePanelPng(
-      panel.title,
-      canvases.plot,
-      canvases.overlay,
-      {
-        background: styles.getPropertyValue("--surface-1").trim(),
-        text: styles.getPropertyValue("--fg-1").trim(),
-        font: styles.getPropertyValue("--font-ui").trim(),
-        caption:
-          canvases.windowNote === null || canvases.windowNote === undefined
-            ? (canvases.quality ?? null)
-            : canvases.quality === null || canvases.quality === undefined
-              ? canvases.windowNote
-              : `${canvases.windowNote} · ${canvases.quality}`,
-      },
-    );
-    const blob = await new Promise<Blob | null>((resolve) => {
-      composed.toBlob(resolve, "image/png");
-    });
-    return blob === null ? null : new Uint8Array(await blob.arrayBuffer());
-  }
-
-  private async exportAllPanelPngs(): Promise<string | null> {
-    const exporter = this.plane.exporter;
-    if (exporter === null) return null;
-    const directory = await exporter.pickDirectory();
-    if (directory === null) return null;
-    const targets = panelPngTargets(this.workspace.tabs());
-    const viewState = this.workspace.captureViewState();
-    let activeTabId: string | null = null;
-    try {
-      for (const target of targets) {
-        if (target.tabId !== activeTabId) {
-          if (!this.workspace.showTabForExport(target.tabId)) {
-            throw new Error(`workspace ${target.tabId} is unavailable`);
-          }
-          activeTabId = target.tabId;
-          this.syncWorkspaceForExport();
-          await this.refreshTiles();
-        }
-        const bytes = await this.buildPanelPng(target.panelId);
-        if (bytes === null) {
-          throw new Error(`panel ${target.panelId} could not be rendered`);
-        }
-        try {
-          await exporter.saveFileToDirectory(
-            directory,
-            target.fileName,
-            "png",
-            toBase64(bytes),
-          );
-        } catch (error: unknown) {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          throw new Error(`failed to export ${target.fileName}: ${message}`);
-        }
-      }
-      return directory;
-    } finally {
-      this.workspace.restoreViewState(viewState);
-      this.syncWorkspaceForExport();
-      await this.refreshTiles();
-    }
-  }
-
-  private syncWorkspaceForExport(): void {
-    this.workspaceTabs?.sync(
-      this.workspace.tabs(),
-      this.workspace.activeTabId(),
-    );
-    this.workspaceView?.sync(
-      this.signals.length > 0,
-      this.visibleSeriesCounts(),
-    );
-    this.workspaceView?.setCursorMode(this.workspace.cursorMode());
-  }
-
-  private async buildVisibleCsv(
-    fidelity: ExportFidelity,
-  ): Promise<CsvExport | null> {
-    const panelId = this.workspace.focusedPanelId();
-    if (panelId === null) return null;
-    const panel = this.workspace.panel(panelId);
-    if (panel === undefined) return null;
-    if (panel.content.kind === "histogram") {
-      const capture = this.plane.histogramCaptures?.find(
-        (entry) => entry.panel_id === panel.id,
-      );
-      const ids =
-        capture?.response.series.map((series) => series.signal_id) ??
-        this.panelSignalIds(panel).ids;
-      if (ids.length === 0) return null;
-      const response = await this.plane.queryHistogram({
-        request_id: crypto.randomUUID(),
-        signal_ids: ids,
-        window: capture?.response.window ?? this.effectiveWindow(panel),
-        bin_count: panel.content.bin_count,
-      });
-      return buildHistogramCsv(response);
-    }
-    const { ids } = this.panelSignalIds(panel);
-    if (ids.length === 0) return null;
-    const window = this.effectiveWindow(panel);
-    const response = await this.plane.querySamples({
-      request_id: crypto.randomUUID(),
-      signal_ids: ids,
-      window,
-      max_points: csvMaxPoints(fidelity),
-    });
-    const byId = new Map(
-      response.series.map((series) => [series.signal_id, series]),
-    );
-    const ordered = ids
-      .map((id) => byId.get(id))
-      .filter((series): series is SampleSeries => series !== undefined);
-    return buildCsv(ordered, window);
   }
 
   private async newWorkspace(): Promise<void> {
@@ -2362,8 +2100,19 @@ export class AppShell {
    * stay recorded; their panels show the unresolved-signal empty state.
    */
   async loadSession(path: string | null): Promise<void> {
+    if (!(await this.restoreSessionState(path))) return;
+    this.afterLayoutChange();
+    this.dirty = false;
+    this.renderWorkspaceName();
+  }
+
+  /**
+   * Restores a session and its signals without presenting it, so the caller
+   * refreshes the panels once. Reports failures and returns false.
+   */
+  private async restoreSessionState(path: string | null): Promise<boolean> {
     const port = this.plane.session;
-    if (port === null) return;
+    if (port === null) return false;
     const progress = required<HTMLElement>(this.root, ".ingest-progress");
     try {
       if (this.autosaveTimer !== null) {
@@ -2407,8 +2156,9 @@ export class AppShell {
       await this.reloadSignals();
 
       const derivedPort = this.plane.derived;
-      if (derivedPort !== null) {
-        for (const definition of [...this.workspace.derivedBundles()]) {
+      const bundles = [...this.workspace.derivedBundles()];
+      if (derivedPort !== null && bundles.length > 0) {
+        for (const definition of bundles) {
           try {
             await derivedPort.createBundle(definition.name, definition.expr);
           } catch {
@@ -2416,7 +2166,10 @@ export class AppShell {
           }
         }
         await this.reloadSignals();
-        for (const definition of [...this.workspace.derived()]) {
+      }
+      const derived = [...this.workspace.derived()];
+      if (derivedPort !== null && derived.length > 0) {
+        for (const definition of derived) {
           try {
             await derivedPort.create(definition.path, definition.expr);
           } catch {
@@ -2425,12 +2178,10 @@ export class AppShell {
         }
         await this.reloadSignals();
       }
-
-      this.afterLayoutChange();
-      this.dirty = false;
-      this.renderWorkspaceName();
+      return true;
     } catch (error: unknown) {
       this.reportError(error);
+      return false;
     } finally {
       progress.hidden = true;
     }
@@ -2565,6 +2316,12 @@ export class AppShell {
     this.signalsByPath = new Map(
       this.signals.map((summary) => [summary.path, summary]),
     );
+    this.publishCatalog();
+    this.updateStatus();
+  }
+
+  /** Hands the current signal catalog to the mounted views. */
+  private publishCatalog(): void {
     this.outline?.setCatalog(this.catalog);
     this.outline?.setFilter(
       required<HTMLInputElement>(this.root, ".signal-search").value,
@@ -2574,7 +2331,6 @@ export class AppShell {
     this.formulaBar?.setSignals(this.signals.map((summary) => summary.path));
     this.formulaBar?.setBundles(bundleCompletionEntries(this.signals));
     this.renderSearchStatus();
-    this.updateStatus();
   }
 
   private refreshTiles(): Promise<void> {
@@ -3098,14 +2854,14 @@ export class AppShell {
 /** Hides and empties the ingest banner. Workspace reset and load both need
  * this: the banner is deliberately kept visible while failures are recent,
  * and nothing else ever takes it down. */
-export function clearIngestProgress(root: HTMLElement): void {
+function clearIngestProgress(root: HTMLElement): void {
   const progress = root.querySelector<HTMLElement>(".ingest-progress");
   if (progress === null) return;
   progress.hidden = true;
   progress.replaceChildren();
 }
 
-export function renderBatchProgress(
+function renderBatchProgress(
   progress: HTMLElement,
   status: BatchStatus,
   cancel: () => void,
@@ -3188,14 +2944,14 @@ function tooltipHeader(text: string): HTMLElement {
   return header;
 }
 
-export interface GroupedCursorRow {
+interface GroupedCursorRow {
   label: string;
   value: string;
   colorIndex: number | null;
   ghost: boolean;
 }
 
-export function groupCursorRows(
+function groupCursorRows(
   rows: readonly PlotCursor["rows"][number][],
   ghostChannels: ReadonlyMap<string, string>,
 ): GroupedCursorRow[] {

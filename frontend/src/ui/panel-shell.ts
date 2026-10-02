@@ -5,7 +5,6 @@ import { required } from "./dom";
 export const SIGNAL_DRAG_TYPE = "application/x-signalscope-signal";
 export const SET_DRAG_TYPE = "application/x-signalscope-set";
 export const PANEL_DRAG_TYPE = "application/x-signalscope-panel";
-export const MAXIMIZE_GLYPH = "↗";
 
 export interface PanelShellSlots {
   readonly binding: HTMLElement;
@@ -213,8 +212,14 @@ export class PanelShell {
       event.stopPropagation();
     });
     for (const [slot, run] of [
-      ["split-right", () => this.callbacks.onSplitRight(this.id)],
-      ["split-down", () => this.callbacks.onSplitDown(this.id)],
+      [
+        "split-right",
+        () => this.callbacks.onSplitRight(this.id, { kind: "line2d" }),
+      ],
+      [
+        "split-down",
+        () => this.callbacks.onSplitDown(this.id, { kind: "line2d" }),
+      ],
       ["minimize", () => this.callbacks.onMinimize?.(this.id)],
       ["maximize", () => this.callbacks.onMaximize(this.id)],
     ] as const)

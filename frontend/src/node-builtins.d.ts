@@ -29,6 +29,7 @@ declare module "node:path" {
 declare module "node:child_process" {
   export interface ChildProcess {
     exitCode: number | null;
+    signalCode: string | null;
     once(event: "exit", listener: () => void): this;
     kill(signal?: string): boolean;
   }

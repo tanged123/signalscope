@@ -43,6 +43,36 @@ impl DialogProvider for Native {
     }
 }
 
+/// Answers every dialog from one directory so a headless browser can drive
+/// the import and export buttons end to end. Pickers return the directory's
+/// files; saves land at `<directory>/<suggested name>`.
+pub struct Directory(pub PathBuf);
+
+impl DialogProvider for Directory {
+    fn pick_files(&self, _title: &str, _filters: &[(&str, &[&str])]) -> Option<Vec<PathBuf>> {
+        let mut files = std::fs::read_dir(&self.0)
+            .ok()?
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| path.is_file())
+            .collect::<Vec<_>>();
+        files.sort();
+        Some(files)
+    }
+
+    fn pick_folder(&self, _title: &str) -> Option<PathBuf> {
+        Some(self.0.clone())
+    }
+
+    fn save_file(
+        &self,
+        _title: &str,
+        file_name: &str,
+        _filters: &[(&str, &[&str])],
+    ) -> Option<PathBuf> {
+        Some(self.0.join(file_name))
+    }
+}
+
 pub struct Scripted {
     pub files: Mutex<Option<Vec<PathBuf>>>,
     pub folder: Mutex<Option<PathBuf>>,

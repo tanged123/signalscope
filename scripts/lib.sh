@@ -4,15 +4,11 @@
 signalscope_scripts_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 signalscope_root="$(cd "$signalscope_scripts_dir/.." && pwd)"
 
-# Re-exec the calling script inside the Nix dev shell when invoked outside it,
-# then apply the defaults every wrapper relies on.
+# Re-exec the calling script inside the Nix dev shell when invoked outside it.
+# The shell hook owns build defaults such as CARGO_BUILD_JOBS and the linker.
 ensure_dev_shell() {
   if [ -z "${IN_NIX_SHELL:-}" ]; then
     exec "$signalscope_scripts_dir/dev.sh" "$0" "$@"
-  fi
-  # Keep local machines responsive; let CI runners use every core.
-  if [ -z "${CI:-}" ]; then
-    export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
   fi
   cd "$signalscope_root" || exit 1
 }
@@ -25,8 +21,13 @@ frontend_checks() {
   pnpm lint
   node --test frontend/scripts/check-architecture.mjs
   pnpm codegen:check
-  pnpm --filter @signalscope/frontend exec tsc --noEmit --project vendor/chartgpu/tsconfig.json
   pnpm test
+}
+
+# The pinned ChartGPU fork's typecheck and suite; they change only with the fork.
+chartgpu_checks() {
+  pnpm --filter @signalscope/frontend exec tsc --noEmit --project vendor/chartgpu/tsconfig.json
+  pnpm --filter @signalscope/frontend exec vitest run --project chartgpu
 }
 
 desktop_checks() {
@@ -46,10 +47,6 @@ rust_checks() {
 
 quality_checks() {
   shellcheck scripts/*.sh .github/hooks/pre-commit
-  "$signalscope_scripts_dir/check-linux-server.test.sh"
-  "$signalscope_scripts_dir/macos-server.test.sh"
-  "$signalscope_scripts_dir/chartgpu-submodule.test.sh"
-  "$signalscope_scripts_dir/ci-policy.test.sh"
   node "$signalscope_scripts_dir/generate-monte-carlo-demo.mjs" --check
   actionlint
   typos
@@ -61,40 +58,9 @@ quality_checks() {
   zizmor .github/workflows/ .github/actions/
 }
 
-bake_roundtrip_artifact() {
-  "$signalscope_scripts_dir/export.sh" \
-    --data frontend/tests/e2e/fixtures/roundtrip.csv \
-    --workspace frontend/tests/e2e/fixtures/roundtrip.signalscope \
-    --range all \
-    --fidelity preview \
-    --out build/export/roundtrip-preview.html
-  "$signalscope_scripts_dir/export.sh" \
-    --no-build \
-    --data frontend/tests/e2e/fixtures/roundtrip.csv \
-    --workspace frontend/tests/e2e/fixtures/roundtrip.signalscope \
-    --range all \
-    --fidelity full \
-    --out build/export/roundtrip-full.html
-}
-
-bake_bench_smoke_artifact() {
-  local -a data_args=()
-  local file out="$signalscope_root/build/bench/smoke.html" max_bytes=268435456 bytes
-  for file in "$signalscope_root"/examples/monte_carlo/run_*.csv; do
-    data_args+=(--data "$file")
-  done
-  "$signalscope_scripts_dir/export.sh" --no-build "${data_args[@]}" \
-    --workspace "$signalscope_root/examples/bench/smoke.workspace.json" \
-    --range all --fidelity full --out "$out"
-  bytes=$(stat -c %s "$out")
-  if [ "$bytes" -gt "$max_bytes" ]; then
-    echo "baked smoke snapshot is $bytes bytes (limit $max_bytes)" >&2
-    return 1
-  fi
-}
-
-build_e2e_server() {
-  # Functional E2E exercises the browser-host contract. Release compilation
-  # is covered by the packaged-app build, so keep this lane incremental.
+e2e_prerequisites() {
+  # Journeys drive the built frontend through an incremental debug server.
+  # Release compilation is covered by the packaged-app build.
+  "$signalscope_scripts_dir/build.sh" web
   cargo build -p scope-server
 }

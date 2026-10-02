@@ -18,9 +18,9 @@ Each named mode matches the GitHub Actions job with the same name:
   quality   Deterministic dependency, shell, workflow, spelling, and unused-code
             checks. RustSec advisory checks need network access on a cold cache.
   rust      cargo clippy plus the full cargo test suite.
-  frontend  pnpm lint, typecheck, codegen check, unit tests, web build, and
-            snapshot artifact checks.
-  e2e       Playwright desktop smoke tests.
+  frontend  pnpm lint, typecheck, codegen check, unit tests, the vendored
+            ChartGPU suite, web build, and snapshot artifact checks.
+  e2e       Playwright user journeys against a real scope-server.
   bench     Full benchmark suite; writes build/bench/report.json.
   build     Official Electron package for the current operating system.
 
@@ -46,9 +46,7 @@ check_format_read_only() {
 }
 
 check_e2e() {
-  bake_roundtrip_artifact
-  bake_bench_smoke_artifact
-  build_e2e_server
+  e2e_prerequisites
   pnpm e2e
   "$signalscope_scripts_dir/server-smoke.sh"
 }
@@ -59,6 +57,7 @@ all)
   quality_checks
   rust_checks
   frontend_checks
+  chartgpu_checks
   artifact_checks
   check_e2e
   ;;
@@ -73,6 +72,7 @@ rust)
   ;;
 frontend)
   frontend_checks
+  chartgpu_checks
   artifact_checks
   ;;
 e2e)
