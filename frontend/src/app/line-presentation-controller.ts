@@ -64,6 +64,8 @@ export class LinePresentationController {
   private renderFrame: number | null = null;
   private refreshTimer: number | null = null;
   private refreshAbort: AbortController | null = null;
+  /** Inputs of the pass in flight; null once it is invalidated or done. */
+  private passKey: string | null = null;
   private disposed = false;
 
   constructor(
@@ -73,6 +75,17 @@ export class LinePresentationController {
 
   refresh(): Promise<void> {
     if (this.disposed) return Promise.resolve();
+    // Restarting a pass over unchanged inputs would abort requests the server
+    // is already computing and send identical ones again (a resize right
+    // after mount did this to every panel on slower machines).
+    if (
+      this.refreshPromise !== null &&
+      !this.refreshQueued &&
+      this.passKey !== null &&
+      this.passKey === this.passInputs().key
+    ) {
+      return this.refreshPromise;
+    }
     this.refreshQueued = true;
     this.refreshToken += 1;
     this.refreshAbort?.abort();
@@ -82,11 +95,18 @@ export class LinePresentationController {
         while (this.refreshQueued) {
           this.refreshQueued = false;
           this.refreshAbort = new AbortController();
-          await this.refreshPass(this.refreshToken, this.refreshAbort.signal);
+          const inputs = this.passInputs();
+          this.passKey = inputs.key;
+          await this.refreshPass(
+            inputs,
+            this.refreshToken,
+            this.refreshAbort.signal,
+          );
         }
       } finally {
         this.refreshAbort = null;
         this.refreshPromise = null;
+        this.passKey = null;
       }
     })();
     return this.refreshPromise;
@@ -163,6 +183,7 @@ export class LinePresentationController {
   invalidate(panelId?: string): void {
     this.refreshToken += 1;
     this.refreshAbort?.abort();
+    this.passKey = null;
     this.cache.invalidate(panelId);
     this.signalXCache.invalidate(panelId);
     if (panelId === undefined) {
@@ -194,10 +215,8 @@ export class LinePresentationController {
     return this.responsesByPanel.values();
   }
 
-  private async refreshPass(
-    refreshToken: number,
-    signal: AbortSignal,
-  ): Promise<void> {
+  /** What a refresh pass plans from, keyed by everything its requests use. */
+  private passInputs() {
     const panels = this.callbacks.panels();
     const fallbackWidth = Math.max(
       1,
@@ -218,6 +237,43 @@ export class LinePresentationController {
         span > 0 ? (paddedWindow.t1 - paddedWindow.t0) / span : 1;
       return { panel, signals, window, paddedWindow, pixelWidth, paddingRatio };
     });
+    const adapterLimits = (
+      this.callbacks.gpu()?.adapter as
+        | { limits?: { maxBufferSize?: unknown } }
+        | undefined
+    )?.limits;
+    const maxBufferSize = Number(adapterLimits?.maxBufferSize ?? 0);
+    const key = JSON.stringify([
+      devicePixelRatio,
+      maxBufferSize,
+      panelInputs.map((input) => [
+        input.panel.id,
+        input.panel.content,
+        input.panel.color_axis,
+        input.signals,
+        input.window,
+        input.pixelWidth,
+      ]),
+    ]);
+    return {
+      panels,
+      panelInputs,
+      devicePixelRatio,
+      maxBufferSize,
+      key,
+    };
+  }
+
+  private async refreshPass(
+    {
+      panels,
+      panelInputs,
+      devicePixelRatio,
+      maxBufferSize,
+    }: ReturnType<LinePresentationController["passInputs"]>,
+    refreshToken: number,
+    signal: AbortSignal,
+  ): Promise<void> {
     let histogramCpu = 0;
     let histogramGpu = 0;
     for (const input of panelInputs) {
@@ -247,13 +303,8 @@ export class LinePresentationController {
     }
     if (panelInputs.some((input) => input.panel.content.kind === "histogram"))
       this.render();
-    const adapterLimits = (
-      this.callbacks.gpu()?.adapter as
-        | { limits?: { maxBufferSize?: unknown } }
-        | undefined
-    )?.limits;
     const budgets = autoPresentationBudgets(
-      Number(adapterLimits?.maxBufferSize ?? 0),
+      maxBufferSize,
       (navigator as Navigator & { deviceMemory?: number }).deviceMemory,
     );
     const replacing = new Set(panels.map((panel) => panel.id));
