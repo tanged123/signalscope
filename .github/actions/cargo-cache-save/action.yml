@@ -1,0 +1,28 @@
+name: Save Cargo caches
+description: >-
+  Save the caches restored by ./.github/actions/cargo-cache. Call it with
+  `if: ${{ !cancelled() }}` so a failing job still keeps its compiled output.
+
+inputs:
+  registry-key:
+    description: The setup action's cargo-registry-save-key output.
+    default: ""
+  target-key:
+    description: The setup action's cargo-target-save-key output.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - if: ${{ !cancelled() && inputs.registry-key != '' }}
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ inputs.registry-key }}
+    - if: ${{ !cancelled() && inputs.target-key != '' }}
+      uses: actions/cache/save@v6
+      with:
+        path: target
+        key: ${{ inputs.target-key }}

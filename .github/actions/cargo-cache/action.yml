@@ -1,17 +1,31 @@
 name: Cargo caches
 description: >-
   Restore the crate registry cache shared by every job and, when target-key
-  is set, a per-profile target-directory cache.
+  is set, a per-profile target-directory cache. Jobs save them afterwards
+  with ./.github/actions/cargo-cache-save, so failed jobs still save.
 
 inputs:
   target-key:
     description: Per-profile target cache key. Empty skips the target cache.
     default: ""
 
+outputs:
+  registry-save-key:
+    description: Key to save the registry under; empty after an exact hit.
+    value: >-
+      ${{ steps.registry.outputs.cache-hit != 'true'
+      && steps.registry.outputs.cache-primary-key || '' }}
+  target-save-key:
+    description: Key to save the target directory under; empty after an exact hit.
+    value: >-
+      ${{ steps.target.outputs.cache-hit != 'true'
+      && steps.target.outputs.cache-primary-key || '' }}
+
 runs:
   using: composite
   steps:
-    - uses: actions/cache@v6
+    - id: registry
+      uses: actions/cache/restore@v6
       with:
         path: |
           ~/.cargo/registry
@@ -19,10 +33,16 @@ runs:
         key: cargo-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
         restore-keys: |
           cargo-registry-${{ runner.os }}-
-    - if: inputs.target-key != ''
-      uses: actions/cache@v6
+    # Compiled output depends on the toolchain and shell hook (flake files)
+    # and on profiles and versions (manifests), not only on the lockfile.
+    - id: target
+      if: inputs.target-key != ''
+      uses: actions/cache/restore@v6
       with:
         path: target
-        key: cargo-target-${{ inputs.target-key }}-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}
+        key: >-
+          cargo-target-${{ inputs.target-key }}-${{ runner.os }}-${{ hashFiles(
+          'Cargo.lock', 'Cargo.toml', 'core/*/Cargo.toml', 'protocol/Cargo.toml',
+          'server/*/Cargo.toml', 'flake.lock', 'flake.nix') }}
         restore-keys: |
           cargo-target-${{ inputs.target-key }}-${{ runner.os }}-

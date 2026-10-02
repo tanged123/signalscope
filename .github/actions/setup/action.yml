@@ -16,6 +16,14 @@ inputs:
       caching.
     default: ""
 
+outputs:
+  cargo-registry-save-key:
+    description: Pass to ./.github/actions/cargo-cache-save after the job's work.
+    value: ${{ steps.cargo-cache.outputs.registry-save-key }}
+  cargo-target-save-key:
+    description: Pass to ./.github/actions/cargo-cache-save after the job's work.
+    value: ${{ steps.cargo-cache.outputs.target-save-key }}
+
 runs:
   using: composite
   steps:
@@ -27,7 +35,8 @@ runs:
         skipPush: ${{ inputs.cachix-auth-token == '' }}
     - run: ./scripts/chartgpu-submodule.sh init
       shell: bash
-    - if: inputs.cargo-cache-key != ''
+    - id: cargo-cache
+      if: inputs.cargo-cache-key != ''
       uses: ./.github/actions/cargo-cache
       with:
         target-key: ${{ inputs.cargo-cache-key }}

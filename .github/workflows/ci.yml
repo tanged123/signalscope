@@ -65,12 +65,18 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup
+      - id: setup
+        uses: ./.github/actions/setup
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cargo-cache-key: rust
           install-frontend: "false"
       - run: ./scripts/ci.sh rust
+      - if: ${{ !cancelled() }}
+        uses: ./.github/actions/cargo-cache-save
+        with:
+          registry-key: ${{ steps.setup.outputs.cargo-registry-save-key }}
+          target-key: ${{ steps.setup.outputs.cargo-target-save-key }}
 
   frontend:
     runs-on: ubuntu-latest
@@ -93,11 +99,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup
+      - id: setup
+        uses: ./.github/actions/setup
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
           cargo-cache-key: e2e
       - run: ./scripts/ci.sh e2e
+      - if: ${{ !cancelled() }}
+        uses: ./.github/actions/cargo-cache-save
+        with:
+          registry-key: ${{ steps.setup.outputs.cargo-registry-save-key }}
+          target-key: ${{ steps.setup.outputs.cargo-target-save-key }}
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -160,7 +172,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup
+      - id: setup
+        uses: ./.github/actions/setup
         if: matrix.platform != 'windows'
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
@@ -173,6 +186,12 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: ./scripts/ci.sh build
+      # Windows skips setup, so its empty keys skip both saves.
+      - if: ${{ !cancelled() }}
+        uses: ./.github/actions/cargo-cache-save
+        with:
+          registry-key: ${{ steps.setup.outputs.cargo-registry-save-key }}
+          target-key: ${{ steps.setup.outputs.cargo-target-save-key }}
       - if: matrix.platform == 'windows'
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
