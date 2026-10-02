@@ -1,7 +1,11 @@
+# Callers run this with `if: ${{ !cancelled() }}` so a failing job still keeps
+# its compiled output. The runner parses expressions in action metadata such as
+# the description, and composite steps reject cancelled(), so the steps below
+# use always() and rely on the caller condition.
 name: Save Cargo caches
 description: >-
-  Save the caches restored by ./.github/actions/cargo-cache. Call it with
-  `if: ${{ !cancelled() }}` so a failing job still keeps its compiled output.
+  Save the caches restored by ./.github/actions/cargo-cache, also after earlier
+  steps of the job fail.
 
 inputs:
   registry-key:
@@ -14,14 +18,14 @@ inputs:
 runs:
   using: composite
   steps:
-    - if: ${{ !cancelled() && inputs.registry-key != '' }}
+    - if: ${{ always() && inputs.registry-key != '' }}
       uses: actions/cache/save@v6
       with:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
         key: ${{ inputs.registry-key }}
-    - if: ${{ !cancelled() && inputs.target-key != '' }}
+    - if: ${{ always() && inputs.target-key != '' }}
       uses: actions/cache/save@v6
       with:
         path: target
