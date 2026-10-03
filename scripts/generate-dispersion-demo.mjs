@@ -164,7 +164,7 @@ function panel(id, title, content, fields) {
     color_by: "source",
     dash_by: null,
     width_by: null,
-    line_width: 1,
+    line_width: 2,
     ghost_opacity: 0.5,
     overrides: [],
     focus: [],
@@ -257,7 +257,6 @@ function workspace(flightPath) {
     panel(id, title, line, {
       bindings: query(`${selector} @demo_flight`),
       color_by: "channel",
-      line_width: 2,
       legend_state: "keys",
       time_window: [0, 20],
     });
