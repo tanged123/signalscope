@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnvelopeBin } from "../generated/protocol";
+import { binColumnsFromWire } from "./bin-columns";
 import { queryAdaptivePyramidRange } from "./pyramid-query";
 
 function bin(t0: number, t1: number): EnvelopeBin {
@@ -61,7 +62,9 @@ describe("queryAdaptivePyramidRange", () => {
       Array.from({ length: 100 }, (_, time) => bin(time, time)),
     );
 
-    expect(queryAdaptivePyramidRange(levels, 0, 99, 20)).toEqual({
+    expect(
+      queryAdaptivePyramidRange(levels.map(binColumnsFromWire), 0, 99, 20),
+    ).toEqual({
       level: 2,
       start: 0,
       end: 25,
@@ -73,7 +76,10 @@ describe("queryAdaptivePyramidRange", () => {
       Array.from({ length: 100 }, (_, time) => bin(time, time)),
     );
 
-    expect(queryAdaptivePyramidRange(levels, 40, 50, 20).level).toBe(0);
+    expect(
+      queryAdaptivePyramidRange(levels.map(binColumnsFromWire), 40, 50, 20)
+        .level,
+    ).toBe(0);
   });
 
   it("refines irregular overview bins until their span fits a pixel", () => {
@@ -82,7 +88,12 @@ describe("queryAdaptivePyramidRange", () => {
       return bin(time, time);
     });
     const levels = buildLevels(levelZero);
-    const range = queryAdaptivePyramidRange(levels, 0, 203, 20);
+    const range = queryAdaptivePyramidRange(
+      levels.map(binColumnsFromWire),
+      0,
+      203,
+      20,
+    );
 
     expect(range.level).toBeGreaterThan(0);
     const pixelSpan = (203 - 0) / 20;

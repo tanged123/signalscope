@@ -1,10 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import type {
-  BakedLine2DLevel,
-  EnvelopeBin,
-  SignalSummary,
-} from "../generated/protocol";
-import { BakedPlane, HttpPlane } from "./data-plane";
+import type { EnvelopeBin, SignalSummary } from "../generated/protocol";
+import { BakedPlane } from "./baked-plane";
+import { snapshotFromWire } from "./wire-snapshot";
+import { HttpPlane } from "./data-plane";
 import { seal, type Envelope } from "./envelope";
 
 it("forwards query cancellation to the HTTP fetch", async () => {
@@ -55,7 +53,9 @@ it("forwards query cancellation to the HTTP fetch", async () => {
 });
 
 it("rejects baked reads aborted before their queued preparation", async () => {
-  const plane = new BakedPlane(seal({ session_json: "", signals: [] }));
+  const plane = new BakedPlane(
+    snapshotFromWire({ session_json: "", signals: [] }),
+  );
   const controller = new AbortController();
   const tiles = plane.queryTiles(
     {
@@ -149,7 +149,7 @@ describe("BakedPlane.querySamples", () => {
       last_value: null,
     };
     const plane = new BakedPlane(
-      seal({
+      snapshotFromWire({
         session_json: "",
         signals: [
           {
@@ -193,7 +193,7 @@ describe("BakedPlane.querySamples", () => {
       last_value: null,
     };
     const plane = new BakedPlane(
-      seal({
+      snapshotFromWire({
         session_json: "",
         signals: [
           {
@@ -231,7 +231,7 @@ describe("BakedPlane.querySamples", () => {
       last_value: null,
     });
     const plane = new BakedPlane(
-      seal({
+      snapshotFromWire({
         session_json: "",
         signals: [
           {
@@ -273,7 +273,7 @@ describe("BakedPlane.querySamples", () => {
       last_value: null,
     };
     const plane = new BakedPlane(
-      seal({
+      snapshotFromWire({
         session_json: "",
         signals: [
           {
@@ -295,7 +295,7 @@ describe("BakedPlane.querySamples", () => {
   });
 
   it("reports finite last values for both generated demo signals", async () => {
-    const plane = BakedPlane.fromDocument({
+    const plane = await BakedPlane.fromDocument({
       querySelector: () => null,
     } as unknown as Document);
 
@@ -322,7 +322,7 @@ describe("BakedPlane.queryLine2D", () => {
       t_max: 3,
       last_value: null,
     });
-    const level: BakedLine2DLevel = {
+    const level = {
       level: 0,
       anchor: [0, 1, 2, 3],
       x: [10, 11, null, 13],
@@ -332,7 +332,7 @@ describe("BakedPlane.queryLine2D", () => {
       ],
     };
     const plane = new BakedPlane(
-      seal({
+      snapshotFromWire({
         session_json: "",
         signals: [
           { summary: summary("11", "position"), levels: [] },
@@ -379,7 +379,7 @@ describe("BakedPlane.queryLine2D", () => {
 
   it("rejects a combination absent from an old or time-only manifest", async () => {
     const plane = new BakedPlane(
-      seal({
+      snapshotFromWire({
         session_json: "",
         signals: [],
       }),
@@ -413,7 +413,7 @@ describe("BakedPlane.queryTiles", () => {
     };
     const levelZero = Array.from({ length: 100 }, (_, time) => bin(time, time));
     const plane = new BakedPlane(
-      seal({
+      snapshotFromWire({
         session_json: "",
         signals: [
           {
@@ -461,7 +461,7 @@ describe("BakedPlane.queryTiles", () => {
       last_value: null,
     });
     const plane = new BakedPlane(
-      seal({
+      snapshotFromWire({
         session_json: "",
         signals: [
           {
@@ -503,7 +503,7 @@ describe("BakedPlane.queryTiles", () => {
       last_value: null,
     };
     const plane = new BakedPlane(
-      seal({
+      snapshotFromWire({
         session_json: "",
         signals: [
           {
@@ -708,7 +708,7 @@ describe("HttpPlane", () => {
 describe("snapshot capabilities", () => {
   it("does not expose native-only ports", () => {
     const plane = new BakedPlane(
-      seal({
+      snapshotFromWire({
         session_json: '{"app":"signalscope"}',
         preferences_json: '{"schema_version":6,"plot_line_width_scale":1.75}',
         signals: [],

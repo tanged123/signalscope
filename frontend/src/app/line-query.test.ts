@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
-import { BakedPlane } from "./data-plane";
-import { seal } from "./envelope";
+import { BakedPlane } from "./baked-plane";
+import { snapshotFromWire } from "./wire-snapshot";
 import { queryLineGroups } from "./line-query";
 import { WorkspaceModel } from "./workspace";
 import { parseBakedSession } from "./baked-session";
@@ -16,7 +16,7 @@ test("captured bundle pairs restore through BakedPlane without network access", 
     ],
   });
   const plane = new BakedPlane(
-    seal({
+    snapshotFromWire({
       session_json: JSON.stringify(workspace.snapshot()),
       signals: ["1", "2", "3", "4"].map((id) => ({
         summary: {

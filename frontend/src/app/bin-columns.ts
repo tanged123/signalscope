@@ -35,17 +35,7 @@ export interface ColumnarTileResponse {
 }
 
 export function binColumnsFromWire(bins: readonly EnvelopeBin[]): BinColumns {
-  return binColumnsFromWireRange(bins, 0, bins.length);
-}
-
-export function binColumnsFromWireRange(
-  bins: readonly EnvelopeBin[],
-  start: number,
-  end: number,
-): BinColumns {
-  const first = Math.max(0, Math.min(bins.length, start));
-  const last = Math.max(first, Math.min(bins.length, end));
-  const count = last - first;
+  const count = bins.length;
   const columns: BinColumns = {
     count,
     t0: new Float64Array(count),
@@ -60,9 +50,8 @@ export function binColumnsFromWireRange(
     finiteCount: new Uint32Array(count),
     flags: new Uint8Array(count),
   };
-  for (let source = first; source < last; source += 1) {
-    const index = source - first;
-    const bin = bins[source] as EnvelopeBin;
+  for (let index = 0; index < count; index += 1) {
+    const bin = bins[index] as EnvelopeBin;
     columns.t0[index] = bin.t0;
     columns.t1[index] = bin.t1;
     columns.first[index] = bin.first ?? Number.NaN;

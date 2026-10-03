@@ -174,11 +174,10 @@ test.describe("exported snapshot round trip", () => {
   }
 
   test("preview materially reduces the signals payload", () => {
-    const preview = JSON.stringify(
-      bakedManifest(artifacts.preview).signals,
-    ).length;
-    const signals = bakedManifest(artifacts.full).signals;
-    const full = JSON.stringify(signals).length;
+    const preview = bakedManifest(artifacts.preview).payload.length;
+    const manifest = bakedManifest(artifacts.full);
+    const signals = manifest.signals;
+    const full = manifest.payload.length;
     expect(preview).toBeLessThan(full / 2);
     // Time is now retained alongside alpha and beta, with the same per-signal budget.
     expect(signals).toHaveLength(3);

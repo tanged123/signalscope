@@ -1,6 +1,7 @@
 import { expect, gotoApp, test, togglePanelStats } from "./fixtures";
 import { WorkspaceModel } from "../../src/app/workspace";
 import { seal } from "../../src/app/envelope";
+import { bakeSampleSignals } from "./snapshot-payload";
 import { mkdirSync } from "node:fs";
 import type { Page, Locator } from "@playwright/test";
 
@@ -12,23 +13,13 @@ async function openWorkspace(page: Page, capture?: string): Promise<Locator> {
   if (second === null) throw new Error("Missing second panel");
   const signals = Array.from({ length: 48 }, (_, index) => {
     const channel = `propulsion/test_stand/temperature_sensor_${String(index + 1).padStart(2, "0")}`;
-    const bins = Array.from({ length: sampleCount }, (_, sample) => {
-      const t = sample / 30;
-      const v = 30 + index * 0.8 + 10 * Math.sin(t / 6 + index / 9);
-      return {
-        t0: t,
-        t1: t,
-        first: v,
-        last: v,
-        min: v,
-        max: v,
-        sum: v,
-        sum_sq: v * v,
-        finite_count: "1",
-        sample_count: "1",
-        has_gap: false,
-      };
-    });
+    const time = Array.from(
+      { length: sampleCount },
+      (_, sample) => sample / 30,
+    );
+    const values = time.map(
+      (t) => 30 + index * 0.8 + 10 * Math.sin(t / 6 + index / 9),
+    );
     return {
       summary: {
         signal_id: String(index + 1),
@@ -40,9 +31,10 @@ async function openWorkspace(page: Page, capture?: string): Promise<Locator> {
         point_count: String(sampleCount),
         t_min: 0,
         t_max: (sampleCount - 1) / 30,
-        last_value: bins.at(-1)?.last ?? null,
+        last_value: values.at(-1) ?? null,
       },
-      levels: [bins],
+      time,
+      values,
     };
   });
   for (const [index, panel] of [first, second].entries()) {
@@ -80,7 +72,7 @@ async function openWorkspace(page: Page, capture?: string): Promise<Locator> {
   const manifest = seal({
     preferences_json: null,
     session_json: JSON.stringify(workspace.snapshot()),
-    signals,
+    ...bakeSampleSignals(signals),
     line2d: null,
   });
   await page.route(/http:\/\/127\.0\.0\.1:417[34]\/$/, async (route) => {

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from "vitest";
-import { BakedPlane, HttpPlane, selectDataPlane } from "./data-plane";
+import { BakedPlane } from "./baked-plane";
+import { HttpPlane, selectDataPlane } from "./data-plane";
 
 describe("selectDataPlane", () => {
   it("selects the live HTTP plane when the baked slot is empty", async () => {

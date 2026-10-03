@@ -33,7 +33,7 @@ mod tests {
     #[test]
     fn old_snapshot_manifests_default_missing_line_payload() {
         let manifest: SnapshotManifest =
-            serde_json::from_str(r#"{"session_json":"{}","signals":[]}"#).unwrap();
+            serde_json::from_str(r#"{"session_json":"{}","payload":"","signals":[]}"#).unwrap();
         assert_eq!(manifest.line2d, None);
     }
 }
