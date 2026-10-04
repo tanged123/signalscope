@@ -11,6 +11,7 @@ use std::{collections::HashMap, io::Write};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use flate2::{Compression, write::DeflateEncoder};
 use scope_protocol::{BakedLevel, BakedLevelEncoding};
+use sha2::{Digest, Sha256};
 
 use super::SnapshotError;
 use crate::bins::{BinLevel, HAS_FIRST, HAS_GAP, HAS_LAST, HAS_MAX, HAS_MIN};
@@ -23,7 +24,8 @@ const U8: u8 = 2;
 pub struct PayloadWriter {
     kinds: Vec<u8>,
     lens: Vec<u32>,
-    index: HashMap<Vec<u8>, u32>,
+    /// SHA-256 of kind and bytes, so the index does not hold a second copy.
+    index: HashMap<[u8; 32], u32>,
     encoder: DeflateEncoder<Vec<u8>>,
 }
 
@@ -39,16 +41,16 @@ impl PayloadWriter {
 
     pub fn f64_column(&mut self, values: &[f64]) -> Result<u32, SnapshotError> {
         let bytes = values.iter().flat_map(|value| value.to_le_bytes());
-        self.column(F64, 8, bytes.collect())
+        self.column(F64, 8, &bytes.collect::<Vec<_>>())
     }
 
     fn u32_column(&mut self, values: &[u32]) -> Result<u32, SnapshotError> {
         let bytes = values.iter().flat_map(|value| value.to_le_bytes());
-        self.column(U32, 4, bytes.collect())
+        self.column(U32, 4, &bytes.collect::<Vec<_>>())
     }
 
     fn u8_column(&mut self, values: &[u8]) -> Result<u32, SnapshotError> {
-        self.column(U8, 1, values.to_vec())
+        self.column(U8, 1, values)
     }
 
     /// Stores non-finite values as NaN, the single "missing" value decoders see.
@@ -60,19 +62,22 @@ impl PayloadWriter {
         self.f64_column(&values)
     }
 
-    fn column(&mut self, kind: u8, width: usize, mut bytes: Vec<u8>) -> Result<u32, SnapshotError> {
-        // The kind prefixes the key so equal bytes of different kinds stay apart.
-        bytes.insert(0, kind);
-        if let Some(index) = self.index.get(&bytes) {
+    fn column(&mut self, kind: u8, width: usize, data: &[u8]) -> Result<u32, SnapshotError> {
+        // The kind is hashed first so equal bytes of different kinds stay apart.
+        let key: [u8; 32] = Sha256::new()
+            .chain_update([kind])
+            .chain_update(data)
+            .finalize()
+            .into();
+        if let Some(index) = self.index.get(&key) {
             return Ok(*index);
         }
-        let data = &bytes[1..];
         let len = u32::try_from(data.len() / width).map_err(|_| SnapshotError::PayloadTooLarge)?;
         let index = u32::try_from(self.kinds.len()).map_err(|_| SnapshotError::PayloadTooLarge)?;
         self.encoder.write_all(&shuffle(data, width))?;
         self.kinds.push(kind);
         self.lens.push(len);
-        self.index.insert(bytes, index);
+        self.index.insert(key, index);
         Ok(index)
     }
 
