@@ -1,5 +1,7 @@
 import { expect, it, vi } from "vitest";
-import { BakedPlane, HttpPlane } from "./data-plane";
+import { BakedPlane } from "./baked-plane";
+import { snapshotFromWire } from "./wire-snapshot";
+import { HttpPlane } from "./data-plane";
 import { seal } from "./envelope";
 import type {
   HistogramRequest,
@@ -52,7 +54,7 @@ it("posts the typed histogram request and forwards cancellation", async () => {
 
 it("serves captured exact counts without accessing source tiles and honors abort", async () => {
   const plane = new BakedPlane(
-    seal({
+    snapshotFromWire({
       session_json: "",
       signals: [],
       histograms: [{ panel_id: "p", bin_count: 1, response }],

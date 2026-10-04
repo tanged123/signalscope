@@ -1,9 +1,6 @@
-import type {
-  EnvelopeBin,
-  SampleResponse,
-  SampleSeries,
-} from "../generated/protocol";
+import type { SampleResponse, SampleSeries } from "../generated/protocol";
 import { lowerBound, upperBound } from "./binary-search";
+import { HAS_FIRST, type BinColumns } from "./bin-columns";
 
 export interface SampleSlice {
   time: number[];
@@ -47,7 +44,7 @@ export function lerpSample(
 }
 
 function sampleWindowBounds(
-  time: readonly number[],
+  time: ArrayLike<number>,
   t0: number,
   t1: number,
 ): [number, number] | null {
@@ -67,8 +64,8 @@ function sampleWindowBounds(
  * against the Rust implementation so a snapshot decimates identically.
  */
 export function sampleWindow(
-  time: readonly number[],
-  values: readonly number[],
+  time: ArrayLike<number>,
+  values: ArrayLike<number>,
   t0: number,
   t1: number,
   maxPoints: number,
@@ -97,35 +94,40 @@ export function sampleWindow(
 
 /** Mirror of `scope_core::compute::sample_window_full`. */
 export function sampleWindowFull(
-  time: readonly number[],
-  values: readonly number[],
+  time: ArrayLike<number>,
+  values: ArrayLike<number>,
   t0: number,
   t1: number,
 ): SampleSlice {
   const bounds = sampleWindowBounds(time, t0, t1);
   if (bounds === null) return { time: [], values: [], stride: 1 };
   const [start, end] = bounds;
-  return {
-    time: time.slice(start, end),
-    values: values.slice(start, end),
-    stride: 1,
-  };
+  const slice: SampleSlice = { time: [], values: [], stride: 1 };
+  for (let index = start; index < end; index += 1) {
+    slice.time.push(time[index] as number);
+    slice.values.push(values[index] as number);
+  }
+  return slice;
 }
 
 /**
- * Reads level-0 envelope bins back as raw samples. Bins are degenerate at
+ * Reads level-0 bin columns back as raw samples. Bins are degenerate at
  * level 0 (`t0 === t1`, `first === last`), so this is exact there and a
  * bin-resolution approximation at any coarser level.
  */
-export function binsToSamples(bins: readonly EnvelopeBin[]): {
-  time: number[];
-  values: number[];
+export function columnsToSamples(bins: BinColumns): {
+  time: Float64Array;
+  values: Float64Array;
 } {
-  const time: number[] = [];
-  const values: number[] = [];
-  for (const bin of bins) {
-    time.push((bin.t0 + bin.t1) * 0.5);
-    values.push(bin.first ?? Number.NaN);
+  const time = new Float64Array(bins.count);
+  const values = new Float64Array(bins.count);
+  for (let index = 0; index < bins.count; index += 1) {
+    time[index] =
+      ((bins.t0[index] as number) + (bins.t1[index] as number)) * 0.5;
+    values[index] =
+      (bins.flags[index] as number) & HAS_FIRST
+        ? (bins.first[index] as number)
+        : Number.NaN;
   }
   return { time, values };
 }

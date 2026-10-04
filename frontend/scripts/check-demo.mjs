@@ -7,6 +7,8 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const demoDirectory = resolve(scriptDirectory, "../../build/demo");
 const htmlPath = resolve(demoDirectory, "demo.html");
 const failures = [];
+// GitHub rejects files over 100 MB; keep headroom for the Pages push.
+const MAX_DEMO_BYTES = 95_000_000;
 
 let html;
 try {
@@ -24,6 +26,12 @@ if (html !== undefined) {
   }
   if (hasHttpResources(html)) {
     failures.push("an HTTP URL remains");
+  }
+  const bytes = Buffer.byteLength(html);
+  if (bytes > MAX_DEMO_BYTES) {
+    failures.push(
+      `demo.html is ${String(bytes)} bytes; limit is ${String(MAX_DEMO_BYTES)}`,
+    );
   }
 }
 

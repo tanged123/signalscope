@@ -2,8 +2,9 @@ import fixtureJson from "../../../protocol/testdata/sample-conformance.json";
 import { describe, expect, it } from "vitest";
 import type { EnvelopeBin } from "../generated/protocol";
 import type { SampleResponse } from "../generated/protocol";
+import { binColumnsFromWire } from "./bin-columns";
 import {
-  binsToSamples,
+  columnsToSamples,
   mergeSampleResponses,
   sampleWindow,
   sampleWindowFull,
@@ -71,7 +72,7 @@ describe("sampleWindowFull", () => {
   });
 });
 
-describe("binsToSamples", () => {
+describe("columnsToSamples", () => {
   it("reads level-0 bins as raw samples and preserves gaps", () => {
     const bin = (time: number, value: number | null): EnvelopeBin => ({
       t0: time,
@@ -86,8 +87,10 @@ describe("binsToSamples", () => {
       sample_count: "1",
       has_gap: value === null,
     });
-    const samples = binsToSamples([bin(0, 5), bin(1, null), bin(2, 7)]);
-    expect(samples.time).toEqual([0, 1, 2]);
+    const samples = columnsToSamples(
+      binColumnsFromWire([bin(0, 5), bin(1, null), bin(2, 7)]),
+    );
+    expect(Array.from(samples.time)).toEqual([0, 1, 2]);
     expect(samples.values[0]).toBe(5);
     expect(Number.isNaN(samples.values[1])).toBe(true);
     expect(samples.values[2]).toBe(7);

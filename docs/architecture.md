@@ -226,7 +226,7 @@ are valid, or X/Y timebases agree.
 | Durable sessions              | `session::from_json`, ordered `MIGRATIONS` (ADR 0005)             | Each supported old version advances to current; unsupported versions fail before restore     |
 | Baked sessions                | `app/baked-session.ts`, shipped with matching snapshot runtime    | Current-version validation; no duplicate frontend migration ladder                           |
 | User preferences              | Rust and TS preferences parsers (ADR 0023)                        | Preferences migration/default tests; preserve unreadable future files                        |
-| Snapshot payload              | Manifest schema plus Rust bake and `BakedPlane` readers           | Captured bindings, range/fidelity, offline zoom limits, size and injection checks            |
+| Snapshot payload              | Manifest schema, `snapshot::payload`, `app/snapshot-payload.ts`   | Bit-exact column round trip (ADR 0068), range/fidelity, size and injection checks            |
 
 These are separate version domains. A protocol change does not go in the
 session migration table. A release version is separate again: it changes
