@@ -1,13 +1,17 @@
-import type { EnvelopeBin } from "../generated/protocol";
-
 export interface PyramidQueryRange {
   level: number;
   start: number;
   end: number;
 }
 
+/** Bin time bounds of one pyramid level. */
+export interface LevelTimes {
+  readonly t0: ArrayLike<number>;
+  readonly t1: ArrayLike<number>;
+}
+
 export function queryAdaptivePyramidRange(
-  levels: readonly EnvelopeBin[][],
+  levels: readonly LevelTimes[],
   t0: number,
   t1: number,
   pixelWidth: number,
@@ -23,7 +27,7 @@ export function queryAdaptivePyramidRange(
 
   let level = levels.length - 1;
   for (let index = 0; index < levels.length; index += 1) {
-    const range = overlappingRange(levels[index] ?? [], t0, t1);
+    const range = overlappingRange(levels[index] as LevelTimes, t0, t1);
     if (range.end - range.start <= target) {
       level = index;
       break;
@@ -31,33 +35,41 @@ export function queryAdaptivePyramidRange(
   }
 
   while (level > 0) {
-    const range = overlappingRange(levels[level] ?? [], t0, t1);
-    const bins = (levels[level] ?? []).slice(range.start, range.end);
-    const fitsPixelFloor =
-      range.end - range.start > pixels &&
-      Number.isFinite(pixelSpan) &&
-      bins.every((bin) => bin.t1 - bin.t0 <= pixelSpan);
+    const times = levels[level] as LevelTimes;
+    const range = overlappingRange(times, t0, t1);
+    let fitsPixelFloor =
+      range.end - range.start > pixels && Number.isFinite(pixelSpan);
+    for (
+      let index = range.start;
+      fitsPixelFloor && index < range.end;
+      index += 1
+    ) {
+      fitsPixelFloor =
+        (times.t1[index] as number) - (times.t0[index] as number) <= pixelSpan;
+    }
     if (fitsPixelFloor) break;
     level -= 1;
   }
 
-  const selected = overlappingRange(levels[level] ?? [], t0, t1);
+  const times = levels[level] as LevelTimes;
+  const selected = overlappingRange(times, t0, t1);
   return {
     level,
     start: Math.max(0, selected.start - 1),
-    end: Math.min((levels[level] ?? []).length, selected.end + 1),
+    end: Math.min(times.t0.length, selected.end + 1),
   };
 }
 
 function overlappingRange(
-  level: readonly EnvelopeBin[],
+  level: LevelTimes,
   t0: number,
   t1: number,
 ): { start: number; end: number } {
+  const count = level.t0.length;
   if (
-    level.length === 0 ||
-    t1 < (level[0] as EnvelopeBin).t0 ||
-    t0 > (level[level.length - 1] as EnvelopeBin).t1
+    count === 0 ||
+    t1 < (level.t0[0] as number) ||
+    t0 > (level.t1[count - 1] as number)
   ) {
     return { start: 0, end: 0 };
   }
@@ -68,12 +80,12 @@ function overlappingRange(
 }
 
 /** First index whose bin ends at or after `t0` (partition point of t1 < t0). */
-function firstOverlapping(level: readonly EnvelopeBin[], t0: number): number {
+function firstOverlapping(level: LevelTimes, t0: number): number {
   let low = 0;
-  let high = level.length;
+  let high = level.t1.length;
   while (low < high) {
     const middle = (low + high) >>> 1;
-    if ((level[middle] as EnvelopeBin).t1 < t0) {
+    if ((level.t1[middle] as number) < t0) {
       low = middle + 1;
     } else {
       high = middle;
@@ -83,15 +95,12 @@ function firstOverlapping(level: readonly EnvelopeBin[], t0: number): number {
 }
 
 /** First index whose bin starts after `t1` (partition point of t0 <= t1). */
-function pastLastOverlapping(
-  level: readonly EnvelopeBin[],
-  t1: number,
-): number {
+function pastLastOverlapping(level: LevelTimes, t1: number): number {
   let low = 0;
-  let high = level.length;
+  let high = level.t0.length;
   while (low < high) {
     const middle = (low + high) >>> 1;
-    if ((level[middle] as EnvelopeBin).t0 <= t1) {
+    if ((level.t0[middle] as number) <= t1) {
       low = middle + 1;
     } else {
       high = middle;

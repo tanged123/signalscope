@@ -321,7 +321,7 @@ fn x_refs(axis: &SampleAxisSource) -> Vec<&SeriesRef> {
 mod tests {
     use super::*;
     use crate::store::SourceKey;
-    use crate::{pyramid::Pyramid, session, snapshot};
+    use crate::{pyramid::Pyramid, session, snapshot, snapshot::payload::decode::Decoded};
     use scope_protocol::{ExportFidelity, ExportRange};
 
     fn colored_fixture() -> (
@@ -450,11 +450,12 @@ mod tests {
         )
         .unwrap();
         let manifest = snapshot::bake(&plan, &session).unwrap();
+        let decoded = Decoded::new(&manifest);
         let lines = manifest.line2d.unwrap();
         assert_eq!(lines.len(), 2);
         assert!(lines.iter().all(|line| line.y_signal_ids.len() == 2));
         assert_eq!(
-            lines[0].levels[0].ys[1],
+            decoded.optional_f64s(lines[0].levels[0].ys[1]),
             vec![Some(10.0), Some(99.0), Some(20.0)]
         );
         let source = store
@@ -571,11 +572,12 @@ mod tests {
         )
         .unwrap();
         let manifest = snapshot::bake(&plan, &session).unwrap();
+        let decoded = Decoded::new(&manifest);
         let lines = manifest.line2d.unwrap();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].y_signal_ids.len(), 1);
-        assert_eq!(lines[0].levels[0].x[0], Some(1.0));
-        assert_eq!(lines[1].levels[0].x[0], Some(2.0));
+        assert_eq!(decoded.optional_f64s(lines[0].levels[0].x)[0], Some(1.0));
+        assert_eq!(decoded.optional_f64s(lines[1].levels[0].x)[0], Some(2.0));
         x_refs.push(x_refs[0].clone());
         session.tabs[0].panels[0].x_axis = SampleAxisSource::Bundle { refs: x_refs };
         assert!(

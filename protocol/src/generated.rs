@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const PROTOCOL_VERSION: u32 = 19;
+pub const PROTOCOL_VERSION: u32 = 20;
 
 mod u64_string {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
@@ -510,18 +510,31 @@ pub struct SaveExportFileToDirectoryRequest {
     pub data_base64: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BakedLevelEncoding {
+    Samples,
+    Bins,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct BakedLevel {
+    pub encoding: BakedLevelEncoding,
+    pub columns: Vec<u32>,
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct BakedSignal {
     pub summary: SignalSummary,
-    pub levels: Vec<Vec<EnvelopeBin>>,
+    pub levels: Vec<BakedLevel>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct BakedLine2DLevel {
     pub level: u32,
-    pub anchor: Vec<f64>,
-    pub x: Vec<Option<f64>>,
-    pub ys: Vec<Vec<Option<f64>>>,
+    pub anchor: u32,
+    pub x: u32,
+    pub ys: Vec<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -577,6 +590,7 @@ pub struct SnapshotManifest {
     pub session_json: String,
     #[serde(default)]
     pub preferences_json: Option<String>,
+    pub payload: String,
     pub signals: Vec<BakedSignal>,
     #[serde(default)]
     pub line2d: Option<Vec<BakedLine2D>>,

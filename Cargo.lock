@@ -2192,13 +2192,15 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "scope-core"
-version = "4.0.1"
+version = "5.0.0"
 dependencies = [
  "arrow-array",
  "arrow-cast",
  "arrow-schema",
+ "base64",
  "crc32fast",
  "csv",
+ "flate2",
  "hdf5-metno",
  "mcap",
  "parquet",
@@ -2214,7 +2216,7 @@ dependencies = [
 
 [[package]]
 name = "scope-protocol"
-version = "4.0.1"
+version = "5.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2223,7 +2225,7 @@ dependencies = [
 
 [[package]]
 name = "scope-server"
-version = "4.0.1"
+version = "5.0.0"
 dependencies = [
  "axum",
  "base64",

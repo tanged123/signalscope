@@ -1,5 +1,5 @@
 {
-  "protocol_version": 19,
+  "protocol_version": 20,
   "types": {
     "TimeWindow": {
       "kind": "object",
@@ -103,7 +103,9 @@
     },
     "IntrospectRequest": {
       "kind": "object",
-      "fields": { "path": "string" }
+      "fields": {
+        "path": "string"
+      }
     },
     "DatasetOutlineKind": {
       "kind": "enum",
@@ -425,20 +427,31 @@
         "data_base64": "string"
       }
     },
+    "BakedLevelEncoding": {
+      "kind": "enum",
+      "variants": ["samples", "bins"]
+    },
+    "BakedLevel": {
+      "kind": "object",
+      "fields": {
+        "encoding": "BakedLevelEncoding",
+        "columns": "u32[]"
+      }
+    },
     "BakedSignal": {
       "kind": "object",
       "fields": {
         "summary": "SignalSummary",
-        "levels": "EnvelopeBin[][]"
+        "levels": "BakedLevel[]"
       }
     },
     "BakedLine2DLevel": {
       "kind": "object",
       "fields": {
         "level": "u32",
-        "anchor": "f64[]",
-        "x": "f64?[]",
-        "ys": "f64?[][]"
+        "anchor": "u32",
+        "x": "u32",
+        "ys": "u32[]"
       }
     },
     "BakedLine2D": {
@@ -491,6 +504,7 @@
       "fields": {
         "session_json": "string",
         "preferences_json": "string?",
+        "payload": "string",
         "signals": "BakedSignal[]",
         "line2d": "BakedLine2D[]?",
         "histograms": "BakedHistogram[]?"

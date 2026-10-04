@@ -16,8 +16,16 @@ EOF
 }
 
 bake() {
+  node "$signalscope_scripts_dir/generate-dispersion-demo.mjs"
+  local data=()
+  local run
+  for run in build/demo-corpus/run_*.csv; do
+    data+=(--data "$run")
+  done
   "$signalscope_scripts_dir/export.sh" \
+    "${data[@]}" \
     --data examples/demo_flight.csv \
+    --workspace build/demo-corpus/dispersion.workspace.json \
     --range all \
     --fidelity full \
     --out build/demo/demo.html

@@ -9,6 +9,8 @@ HTML snapshots that work offline.
 ## Interactive demo
 
 [Open the interactive HTML snapshot](https://tanged123.github.io/signalscope/demo.html).
+It holds a 1,000-run suborbital Monte Carlo dispersion set at full fidelity
+(about 2 million samples) plus a single flight, in one offline HTML file.
 
 ## Install
 

@@ -33,7 +33,7 @@ progress; amend earlier records with explicit links when their guidance changes.
 15. [Desktop-only input](0021-desktop-only-input.md)
 16. [Durable session persistence](0022-durable-session-persistence.md) (restore ordering amended by 0027)
 17. [Global preferences file](0023-global-preferences-file.md)
-18. [Snapshot manifest and export budget](0024-snapshot-manifest-and-export-budget.md)
+18. [Snapshot manifest and export budget](0024-snapshot-manifest-and-export-budget.md) (level wire format amended by 0068)
 19. [Orthogonal export range and fidelity](0025-orthogonal-export-range-and-fidelity.md)
 20. [Batch ingest and off-lock decode](0026-batch-ingest-and-off-lock-decode.md)
 21. [Durable source identity and restore reconciliation](0027-durable-source-identity-and-restore-reconciliation.md) (legacy reconciliation retired by 0050)
@@ -77,3 +77,4 @@ progress; amend earlier records with explicit links when their guidance changes.
 
 58. [Scatter panels and panel creation](0066-scatter-panels-and-creation.md)
 59. [Exact histogram panels](0067-exact-histogram-panels.md)
+60. [Binary snapshot payload](0068-binary-snapshot-payload.md)
