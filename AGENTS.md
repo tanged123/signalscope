@@ -12,16 +12,13 @@ changes and inspect before editing.
   visuals and interaction. The reference prototype is behavioral context, not
   production code.
 - For architecture or data work, read `docs/architecture.md` for module
-  placement and shared primitives, then `docs/adr/README.md`, the relevant
-  accepted ADRs, and `docs/implementation-roadmap.md`. Superseded ADRs and
-  historical design explorations are not requirements.
+  placement and shared primitives, and the accepted ADRs for the area
+  (`docs/adr/README.md`).
 - If requirements are ambiguous, state a small proposal before expanding
-  scope. Record architectural changes in a new or amended ADR.
-- For boundary changes, name the state/invariant owner, dependencies,
-  publication and cleanup points, compatibility impact, and validating test
-  or measurement before choosing an abstraction. Use `docs/adr/template.md`;
-  ordinary local changes do not need an ADR. Distinguish current code,
-  accepted policy, and pending work (ADR 0054).
+  scope. Write an ADR only for a decision that is expensive to reverse:
+  schema or protocol compatibility, data or reduction semantics, or a
+  process-wide resource policy. Other changes explain themselves in code,
+  comments and the commit message.
 
 ## Working rules
 
@@ -45,7 +42,7 @@ generation is the sole direct package command below.
 ```text
 ./scripts/setup.sh                    install locked frontend dependencies
 ./scripts/run.sh app|dev|web          packaged, development, or browser host
-./scripts/test.sh [quick|core|server|desktop|unit|frontend|e2e|bench|full]
+./scripts/test.sh [quick|core|server|desktop|unit|chartgpu|frontend|e2e|bench|full]
 ./scripts/format.sh [--check]         apply or check treefmt formatting
 ./scripts/build.sh app|server|web
 ./scripts/export.sh                   build a self-contained snapshot
@@ -63,7 +60,9 @@ stage formatter changes. Install hooks with `./scripts/install-hooks.sh`.
 
 Run the narrowest affected tests, then a gate proportional to the change. Use
 `./scripts/ci.sh all` for cross-layer work and defer e2e, GUI, and platform
-builds until implementation is complete. Report what actually ran.
+builds until implementation is complete. The vendored ChartGPU fork's suite
+runs only through `./scripts/test.sh chartgpu` and CI; run it when you change
+the fork. Report what actually ran.
 
 ## Product and architecture boundaries
 
@@ -126,16 +125,22 @@ plot owns complete labeled axes and serialized per-panel state. Pointer actions
 need keyboard paths. Keep rendering deterministic and snapshot dependencies
 offline.
 
-Behavior changes need behavior tests. Use Rust tests for ingest, time,
-pyramids, protocol/session, and expressions; TypeScript tests for application,
-renderer, and snapshot behavior; Playwright for desktop interaction, layout,
-and export boundaries. Keep generated outputs synchronized.
+Tests exist to catch broken user experience and wrong data, not to pin
+implementation. Rust tests cover ingest, time, pyramids, protocol/session, and
+expressions. TypeScript unit tests cover pure data and math (decoders,
+resolution, ranges, statistics, parsing). Playwright journeys in
+`frontend/tests/e2e/` drive the real server through user-visible controls and
+assert outcomes: plots draw, actions change what the user sees, sessions and
+exports reproduce the workbench. Do not add tests that assert markup, class
+names, label wording, pixel geometry, or mocked GPU/DOM calls; a UI change
+should not require a test change unless a journey's outcome changed. Keep
+generated outputs synchronized.
 
 ## Delivery
 
-Use small conventional commits that explain why. Update the nearest README,
-roadmap, or ADR when behavior changes. A PR targeting `main` gets exactly one
-synchronized version bump: `major` for a breaking API/schema change, `minor`
-for a backward-compatible feature, and `patch` for fixes, refactors, tests,
-tooling, or docs. Run `./scripts/version.sh check` before handoff; never bump
-again for follow-up commits in the same PR.
+Use small conventional commits that explain why. Update the docs that describe
+changed behavior. Releasing is opt-in: a PR that should ship a release runs
+`./scripts/version.sh bump major|minor|patch` once (`major` for a breaking
+API/schema change, `minor` for a compatible feature, `patch` otherwise), and
+merging it to `main` tags and publishes that version. Other PRs leave the
+version alone; `./scripts/version.sh check` only verifies the manifests agree.

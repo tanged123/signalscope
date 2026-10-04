@@ -19,12 +19,12 @@ Usage: ./scripts/test.sh [quick|core|server|desktop|unit|chartgpu|architecture|f
   server    Test the browser host server, optionally filtered.
   desktop   Test the Electron shell; pass package to smoke-test a built package.
   unit      Run frontend unit tests, optionally filtered.
-  chartgpu  Typecheck and test the ChartGPU fork.
+  chartgpu  Typecheck and test the vendored ChartGPU fork.
   architecture  Check frontend import-boundary rules against allowed/forbidden examples.
   frontend  Run frontend lint, typecheck, codegen check, unit tests, and
             snapshot artifact checks.
   artifacts Build the web frontend and check the self-contained snapshot.
-  e2e       Run Playwright desktop smoke tests, optionally filtered.
+  e2e       Run Playwright user journeys against a real scope-server, optionally filtered.
   bench     Run corpus, core, and Playwright performance benchmarks.
             Modes: all (default), corpus, core, e2e, line2d (CPU), line-gpu.
   full      Run quick checks, test the browser host, then run e2e.
@@ -95,7 +95,7 @@ test_desktop() {
 }
 
 test_unit() {
-  pnpm --filter @signalscope/frontend exec vitest run "$@"
+  pnpm --filter @signalscope/frontend exec vitest run --project app "$@"
 }
 
 test_frontend() {
@@ -180,8 +180,7 @@ unit)
   test_unit "$@"
   ;;
 chartgpu)
-  pnpm --filter @signalscope/frontend exec tsc --noEmit --project vendor/chartgpu/tsconfig.json
-  test_unit vendor/chartgpu/src
+  chartgpu_checks
   ;;
 architecture)
   node --test frontend/scripts/check-architecture.mjs
@@ -194,9 +193,7 @@ frontend)
   ;;
 e2e)
   shift || true
-  bake_roundtrip_artifact
-  bake_bench_smoke_artifact
-  build_e2e_server
+  e2e_prerequisites
   pnpm e2e "$@"
   "$signalscope_scripts_dir/server-smoke.sh"
   ;;
@@ -214,7 +211,7 @@ bench)
     pnpm --filter @signalscope/frontend exec vitest bench --run src/app/plot-capabilities.bench.ts
     ;;
   line-gpu)
-    SIGNALSCOPE_LINE_GPU_BENCH=1 pnpm --filter @signalscope/frontend exec playwright test --project=desktop line-strip.spec.ts --workers=1
+    SIGNALSCOPE_LINE_GPU_BENCH=1 pnpm --filter @signalscope/frontend exec playwright test --project=bench line-strip.spec.ts --workers=1
     ;;
   e2e)
     bench_e2e
@@ -232,9 +229,7 @@ full)
   test_core
   test_frontend
   cargo test -p scope-server
-  bake_roundtrip_artifact
-  bake_bench_smoke_artifact
-  build_e2e_server
+  e2e_prerequisites
   pnpm e2e
   "$signalscope_scripts_dir/server-smoke.sh"
   ;;

@@ -131,6 +131,27 @@ pub fn load_from_path(path: &Path) -> Result<Preferences, PreferencesError> {
     from_json(&std::fs::read_to_string(path)?)
 }
 
+/// The appearance a snapshot carries: the same fields the workbench's Export
+/// button sends (`snapshotPreferences` in the frontend). Theme travels in the
+/// session, and machine-local paths and budgets stay out of shared files.
+#[must_use]
+pub fn snapshot_json(preferences: &Preferences) -> String {
+    serde_json::json!({
+        "schema_version": preferences.schema_version,
+        "ui_font_family": preferences.ui_font_family,
+        "plot_font_family": preferences.plot_font_family,
+        "ui_font_size": preferences.ui_font_size,
+        "plot_font_size": preferences.plot_font_size,
+        "plot_line_width_scale": preferences.plot_line_width_scale,
+        "color_palette": preferences.color_palette,
+        "contour_palette": preferences.contour_palette,
+        "custom_color_palette": preferences.custom_color_palette,
+        "custom_contour_palette": preferences.custom_contour_palette,
+        "contour_reversed": preferences.contour_reversed,
+    })
+    .to_string()
+}
+
 /// Migration ladder (ADR 0005 pattern): v7 is current; each future bump adds
 /// one arm that rewrites vN into vN+1 shape and recurses.
 fn migrate(version: u32, value: &serde_json::Value) -> Result<Preferences, PreferencesError> {
@@ -233,6 +254,28 @@ pub enum PreferencesError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_appearance_round_trips_without_machine_settings() {
+        let preferences = Preferences {
+            plot_line_width_scale: 1.75,
+            plot_font_size: 12.5,
+            color_palette: ColorPalette::Custom,
+            cache_root: Some("/home/someone/cache".to_owned()),
+            recipe_directory: Some("/home/someone/recipes".to_owned()),
+            ..Preferences::default()
+        };
+        let json = snapshot_json(&preferences);
+        assert!(!json.contains("/home/someone"));
+        let restored = from_json(&json).expect("snapshot appearance parses");
+        assert!((restored.plot_line_width_scale - 1.75).abs() < f64::EPSILON);
+        assert!((restored.plot_font_size - 12.5).abs() < f64::EPSILON);
+        assert_eq!(restored.color_palette, ColorPalette::Custom);
+        assert_eq!(
+            restored.custom_color_palette,
+            preferences.custom_color_palette
+        );
+    }
 
     #[test]
     fn palette_preferences_migrate_repair_and_roundtrip() {

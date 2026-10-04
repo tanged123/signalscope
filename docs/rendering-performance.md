@@ -30,7 +30,6 @@ pixel ratio, series count and retained row count.
 
 ```sh
 ./scripts/test.sh bench line2d
-./scripts/test.sh e2e line-strip.spec.ts --workers=1
 ./scripts/test.sh bench line-gpu
 ```
 

@@ -19,8 +19,8 @@ import type { Palette, SeriesStroke, TickFormatter } from "./plot-theme";
 import type { GpuContext } from "./gpu-context";
 import type { Line2DRenderRequest } from "./line2d";
 
-export const CHART_GRID = { left: 60, right: 12, top: 8, bottom: 34 } as const;
-export const INLINE_CHART_GRID = {
+const CHART_GRID = { left: 60, right: 12, top: 8, bottom: 34 } as const;
+const INLINE_CHART_GRID = {
   left: 8,
   right: 8,
   top: 8,
@@ -307,25 +307,31 @@ export class ChartHost {
     return this.lastLayout;
   }
 
+  /**
+   * Composites the plot as presented this frame. The shared frame loop may
+   * already have drawn the dirty chart earlier in the same frame, so a clean
+   * chart is expected here, not a render failure. ChartGPU defers its submit
+   * to a microtask; compositing waits for it but stays inside the frame,
+   * before the swap-chain texture is presented and released.
+   */
   async capture(): Promise<HTMLCanvasElement> {
     if (this.options !== null) this.chart.setOption({ ...this.options });
-    return new Promise((resolve) => {
-      requestAnimationFrame(() => {
-        this.renderPendingFrame();
-        const sources = Array.from(
-          this.container.querySelectorAll("canvas"),
-        ).filter((canvas) => !canvas.hidden && canvas !== this.colorbar.canvas);
-        const target = document.createElement("canvas");
-        target.width = sources[0]?.width ?? 1;
-        target.height = sources[0]?.height ?? 1;
-        const context = target.getContext("2d");
-        if (context !== null) {
-          for (const source of sources) context.drawImage(source, 0, 0);
-        }
-        this.colorbar.capture(target, this.colorbarBottom());
-        resolve(target);
-      });
-    });
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    if (this.chart.needsRender()) this.renderPendingFrame();
+    await Promise.resolve();
+    const sources = Array.from(
+      this.container.querySelectorAll("canvas"),
+    ).filter((canvas) => !canvas.hidden && canvas !== this.colorbar.canvas);
+    if (sources.length === 0) throw new Error("plot has no rendered canvas");
+    const target = document.createElement("canvas");
+    target.width = sources[0]?.width ?? 1;
+    target.height = sources[0]?.height ?? 1;
+    const context = target.getContext("2d");
+    if (context !== null) {
+      for (const source of sources) context.drawImage(source, 0, 0);
+    }
+    this.colorbar.capture(target, this.colorbarBottom());
+    return target;
   }
 
   resize(): void {

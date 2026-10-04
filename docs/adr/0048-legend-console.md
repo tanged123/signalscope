@@ -2,9 +2,8 @@
 
 Status: Accepted
 
-Supersedes the legend presentation in
-[ADR 0012](0012-panel-command-routing-and-bounded-legends.md) and
-[ADR 0013](0013-responsive-panel-legends.md).
+Supersedes the legend presentation in ADRs 0012 and 0013 (removed; see git
+history).
 
 ## Context
 

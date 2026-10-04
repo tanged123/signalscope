@@ -39,7 +39,7 @@ export const SERIES_TOKENS = [
 
 // MATLAB advances line style after exhausting its categorical color order.
 // SignalScope keeps --series-8 as the first dashed rollover for compatibility.
-export const COLOR_SLOTS = SERIES_TOKENS.length - 1;
+const COLOR_SLOTS = SERIES_TOKENS.length - 1;
 
 const FALLBACK_MONO = '"JetBrains Mono", monospace';
 const DEFAULT_TICK_COUNT = 5;
@@ -85,20 +85,6 @@ function plotLineWidthScale(styles: CSSStyleDeclaration): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
-export function tickFont(palette: {
-  fontPlot: string;
-  fontSize: number;
-}): string {
-  return `${String(palette.fontSize)}px ${palette.fontPlot}`;
-}
-
-export function labelFont(palette: {
-  fontPlot: string;
-  fontSize: number;
-}): string {
-  return `${String(palette.fontSize + 0.5)}px ${palette.fontPlot}`;
-}
-
 export function invalidatePalette(): void {
   cached = null;
 }
@@ -141,7 +127,7 @@ export function resolvePalette(): Palette {
   return cached;
 }
 
-export function ticks(min: number, max: number, count: number): number[] {
+function ticks(min: number, max: number, count: number): number[] {
   if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) return [];
   const roughStep = (max - min) / Math.max(1, count - 1);
   const magnitude = 10 ** Math.floor(Math.log10(roughStep));
@@ -155,33 +141,6 @@ export function ticks(min: number, max: number, count: number): number[] {
     values.push(Math.abs(value) < step * 1e-9 ? 0 : value);
   }
   return values;
-}
-
-export function formatTicks(
-  values: readonly number[],
-  range?: TickRange,
-): string[] {
-  const magnitudes = values.map(Math.abs).filter((value) => value > 0);
-  const largest = magnitudes.length === 0 ? 0 : Math.max(...magnitudes);
-  const smallest = magnitudes.length === 0 ? 0 : Math.min(...magnitudes);
-  let gap = Number.POSITIVE_INFINITY;
-  for (let index = 1; index < values.length; index += 1) {
-    const step = Math.abs((values[index] ?? 0) - (values[index - 1] ?? 0));
-    if (step > 0) gap = Math.min(gap, step);
-  }
-  if (range !== undefined) {
-    const rangeGap = tickStep(range);
-    if (Number.isFinite(rangeGap)) gap = rangeGap;
-  }
-  const digits = Number.isFinite(gap) ? Math.ceil(-Math.log10(gap)) + 1 : 0;
-  return values.map((value) => {
-    return formatTick(
-      value,
-      gap,
-      digits,
-      largest >= 10_000 || (smallest > 0 && smallest < 0.001),
-    );
-  });
 }
 
 export function createRangeTickFormatter(range: TickRange): TickFormatter {

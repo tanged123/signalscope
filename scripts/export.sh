@@ -8,10 +8,12 @@ ensure_dev_shell "$@"
 show_help() {
   cat <<'EOF'
 Usage: ./scripts/export.sh [--no-build] --data <file>... [--workspace <file>]
-                           [--range visible|all]
+                           [--preferences <file>] [--range visible|all]
                            [--fidelity preview|standard|high|full] --out <path>
 
-Bakes a self-contained HTML snapshot from data files. Defaults to all/full.
+Bakes a self-contained HTML snapshot from data files, as the workbench's
+Export button does. Defaults to all/full and the default appearance; pass a
+preferences.json to bake its fonts, line widths and palettes.
 Builds the frontend snapshot template first unless --no-build is supplied.
 EOF
 }

@@ -14,6 +14,7 @@ struct Args {
     no_auth: bool,
     no_open: bool,
     exit_on_stdin_close: bool,
+    dialog_dir: Option<PathBuf>,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,7 +31,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .join("signalscope")
     });
     let frontend_dir = args.frontend_dir.or_else(default_frontend_dir);
-    let ctx = AppContext::new(data_dir, token.clone(), frontend_dir);
+    let mut ctx = AppContext::new(data_dir, token.clone(), frontend_dir);
+    if let Some(directory) = args.dialog_dir {
+        ctx.dialogs = std::sync::Arc::new(scope_server::dialogs::Directory(directory));
+    }
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async move {
         let listener =
@@ -113,6 +117,7 @@ fn parse_args_from(args: impl IntoIterator<Item = String>) -> Result<Args, Strin
         no_auth: false,
         no_open: false,
         exit_on_stdin_close: false,
+        dialog_dir: None,
     };
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -131,6 +136,11 @@ fn parse_args_from(args: impl IntoIterator<Item = String>) -> Result<Args, Strin
             "--data-dir" => {
                 parsed.data_dir = Some(PathBuf::from(
                     args.next().ok_or("--data-dir needs a value")?,
+                ));
+            }
+            "--dialog-dir" => {
+                parsed.dialog_dir = Some(PathBuf::from(
+                    args.next().ok_or("--dialog-dir needs a value")?,
                 ));
             }
             "--no-auth" => parsed.no_auth = true,

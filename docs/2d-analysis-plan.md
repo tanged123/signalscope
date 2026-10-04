@@ -26,8 +26,8 @@ representation of the source distribution.
 Use the [architecture guide](architecture.md) for owners and shared primitives,
 and the [design handoff](Signal%20Scope%20UI%20Design%20Pass/design_handoff_signalscope_ui/README.md)
 and its Final Spec for visuals and interaction, with accepted amendments.
-Historical spectrum/histogram ADRs 0017/0018 are superseded; their defaults
-are not requirements for this work.
+The removed spectrum/histogram ADRs 0017/0018 are not requirements for this
+work.
 
 ## Priority and delivery order
 
@@ -421,9 +421,8 @@ Contours, transfer-function/Bode analysis, and 3D require separate proposals.
    gap-heavy, and many-panel workloads. Record hardware, inputs, latency, and
    peak resource costs. Rendering reuse alone does not establish performance.
 5. Run `./scripts/ci.sh all` for cross-layer implementation, treefmt via
-   `./scripts/format.sh`, and `./scripts/version.sh check`. A PR to main has
-   exactly one synchronized release bump: minor for compatible features,
-   major for breaking API/schema changes, patch for docs/fixes/refactors.
+   `./scripts/format.sh`, and `./scripts/version.sh check`. Bump the version
+   (`./scripts/version.sh bump`) only in a PR that should ship a release.
 6. Update current behavior in the nearest documentation and close the relevant
    roadmap item with actual evidence. Remove completed proposal detail here
    once current docs/ADRs cover it; keep this file focused on remaining scope.

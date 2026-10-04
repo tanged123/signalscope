@@ -270,6 +270,7 @@ describe("LinePresentationController", () => {
     const first = probe.controller.refresh();
     const obsoleteSignal = probe.queryTiles.mock.calls[0]?.[1];
     probe.queryTiles.mockResolvedValue(response);
+    probe.windows.set("panel-1", { t0: 1, t1: 6 });
     const second = probe.controller.refresh();
     await Promise.all([first, second]);
 
@@ -280,6 +281,21 @@ describe("LinePresentationController", () => {
       { kind: "time", response },
     ]);
     expect(probe.onError).not.toHaveBeenCalled();
+  });
+
+  it("joins the pass in flight when nothing it plans from changed", async () => {
+    const pending = deferred<ColumnarTileResponse>();
+    const probe = controllerProbe(() => pending.promise);
+
+    const first = probe.controller.refresh();
+    const signal = probe.queryTiles.mock.calls[0]?.[1];
+    const second = probe.controller.refresh();
+    pending.resolve(tileResponse());
+    await Promise.all([first, second]);
+
+    expect(signal?.aborted).toBe(false);
+    expect(probe.queryTiles).toHaveBeenCalledOnce();
+    expect(probe.render).toHaveBeenCalledOnce();
   });
 
   it("clears scheduled work and remains reusable", async () => {
@@ -546,6 +562,7 @@ describe("LinePresentationController", () => {
 
     const refresh = probe.controller.refresh();
     await Promise.resolve();
+    probe.windows.set("panel-1", { t0: 1, t1: 6 });
     const queued = probe.controller.refresh();
     first.resolve(tileResponse("first"));
     await Promise.resolve();

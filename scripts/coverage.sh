@@ -31,14 +31,6 @@ coverage_rust() {
 coverage_frontend() {
   echo "Generating frontend coverage..."
   pnpm --filter @signalscope/frontend test:coverage
-  bake_roundtrip_artifact
-  bake_bench_smoke_artifact
-  build_e2e_server
-  SIGNALSCOPE_COVERAGE=1 pnpm e2e
-  (
-    cd "$signalscope_root/frontend"
-    node scripts/merge-coverage.mjs
-  )
 }
 
 mkdir -p "$coverage_dir"

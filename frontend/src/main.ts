@@ -41,20 +41,17 @@ async function boot(): Promise<void> {
     lifecycle.stopped = true;
     app?.stopPresentation();
   });
-  const plane = await planePromise;
-  if (isStopped()) {
-    (await gpuPromise)?.dispose();
-    return;
-  }
-  app = new AppShell(root, plane, null, recoverGpu);
-  await app.mount();
-  const gpu = await gpuPromise;
+  // The GPU's buffer limits size the first data requests, so mount waits for
+  // it rather than querying once without it and again when it arrives.
+  const [plane, gpu] = await Promise.all([planePromise, gpuPromise]);
   if (isStopped()) {
     gpu?.dispose();
     return;
   }
+  app = new AppShell(root, plane, recoverGpu);
   if (gpu === null) recoverGpu();
   else app.setGpu(gpu);
+  await app.mount();
 }
 
 void boot().catch((error: unknown) => {

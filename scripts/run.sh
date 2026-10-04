@@ -22,7 +22,10 @@ app)
   if [ ! -d frontend/dist ]; then
     "$signalscope_scripts_dir/build.sh" web
   fi
-  exec cargo run --release -p scope-server "$@"
+  # The dev profile is incremental, shares its cache with tests and `dev`,
+  # and optimizes scope-core and dependencies (Cargo.toml). Packaged builds
+  # use ./scripts/build.sh for the full release profile.
+  exec cargo run -p scope-server "$@"
   ;;
 dev)
   shift || true

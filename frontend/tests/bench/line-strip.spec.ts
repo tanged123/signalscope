@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { expect, test } from "./fixtures";
+import { expect, test } from "../e2e/fixtures";
 
 interface LineStripResult {
   comparisons: number;
@@ -18,7 +18,7 @@ test("line strips preserve triangle-list pixels, gaps, colors and dash coverage"
   page,
 }) => {
   test.setTimeout(120_000);
-  await page.goto("/tests/e2e/fixtures/line-strip.html");
+  await page.goto("/tests/bench/line-strip.html");
   const result = await page.evaluate((measure) => {
     const fixture = window as unknown as {
       runLineStrip(measure: boolean): Promise<LineStripResult>;
